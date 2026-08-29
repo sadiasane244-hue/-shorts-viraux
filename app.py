@@ -1,7 +1,10 @@
 """
 SHORTS VIRAUX - Generateur Automatique
 Niche: Cerveau, Psychologie & Faits Fascinants
-Deployable sur Render, Streamlit Cloud, ou Replit
+Voix: Edge TTS (gratuit, voix fr-FR-DeniseNeural)
+LLM: Gemini API
+Ton: Jeune, moderne, naturel, respectueux des valeurs islamiques
+Deployable sur Render
 """
 
 import streamlit as st
@@ -11,8 +14,6 @@ import random
 import asyncio
 import json
 import textwrap
-from io import BytesIO
-from datetime import datetime
 
 import edge_tts
 from moviepy.editor import (
@@ -20,27 +21,24 @@ from moviepy.editor import (
     AudioFileClip, concatenate_videoclips
 )
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
-import numpy as np
 
 # ============================================
 # CONFIGURATION
 # ============================================
 
-# Clés API depuis les variables d'environnement (Render/Streamlit Cloud)
-# OU depuis un fichier config local (Replit)
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-# Fallback: essayer de lire depuis un fichier secrets.json (pour Replit)
+# Fallback secrets.json
 try:
-    with open("secrets.json", "r") as f:
-        secrets = json.load(f)
+    with open("secrets.json", "r") as f2:
+        secrets = json.load(f2)
         PEXELS_API_KEY = secrets.get("PEXELS_API_KEY", PEXELS_API_KEY)
-        GROQ_API_KEY = secrets.get("GROQ_API_KEY", GROQ_API_KEY)
+        GEMINI_API_KEY = secrets.get("GEMINI_API_KEY", GEMINI_API_KEY)
 except:
     pass
 
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
 W, H = 1080, 1920
 FPS = 30
@@ -93,58 +91,72 @@ def get_font_path():
 FONT_PATH = get_font_path()
 
 # ============================================
-# 1. GENERATION DU SCRIPT (Groq API)
+# 1. GENERATION DU SCRIPT (Gemini API)
 # ============================================
 
 def generate_script(topic):
-    if not GROQ_API_KEY:
-        return None, "Cle API Groq manquante. Ajoute-la dans les variables d'environnement ou dans secrets.json"
+    if not GEMINI_API_KEY:
+        return None, "Cle API Gemini manquante."
 
-    system_prompt = """Tu es un expert de contenu viral sur les reseaux sociaux, specialise dans la niche "cerveau, psychologie et faits fascinants sur l esprit humain".
+    system_prompt = """Tu es un createur de contenu viral sur TikTok/YouTube Shorts, specialise dans la niche "cerveau, psychologie et faits fascinants".
 
-Genere un script de SHORT (50-55 secondes, environ 130 mots) au format JSON strict avec cette structure exacte :
+TON :
+- Francais jeune et moderne (style TikTok 2024/2025)
+- Naturel, comme si tu parlais a un pote
+- ENTHOUSIASTE et DYNAMIQUE
+- JAMAIS vulgaire, JAMAIS dinsultes
+- Respectueux des valeurs islamiques :
+  * Ne mentionne jamais "Mere Nature" ou "la nature a cree"
+  * Ne dis jamais que quelque chose a ete cree par hasard
+  * Si tu parles de creation, dis "Allah a cree" ou evite le sujet
+  * Pas de blaspheme, pas de contenu haram
+  * Pas de references religieuses forcees, sois naturel
+- Utilise des expressions modernes : "c est fou ca", "incroyable", "tu vas pas y croire", "la science confirme"
+- Style narratif AMUSANT, comme si tu racontais a ton frere au cafe
+
+Genere un script de SHORT (50-55 secondes, environ 130 mots) au format JSON strict :
 
 {
-  "title": "Titre accrocheur pour la miniature (3-5 mots max)",
+  "title": "Titre accrocheur (3-5 mots max)",
   "segments": [
-    {"type": "hook", "text": "Phrase choc percutante (8-12 mots)", "emoji": "🧠", "color": "#FFD700"},
-    {"type": "fact", "text": "Fait numero 1 (15-20 mots)", "emoji": "1️⃣", "color": "#FFFFFF"},
-    {"type": "fact", "text": "Fait numero 2 (15-20 mots)", "emoji": "2️⃣", "color": "#FFFFFF"},
-    {"type": "fact", "text": "Fait numero 3 (15-20 mots)", "emoji": "3️⃣", "color": "#FFFFFF"},
-    {"type": "cta", "text": "Call-to-action engageant (8-10 mots)", "emoji": "🔥", "color": "#00FFFF"}
+    {"type": "hook", "text": "Phrase choc (8-12 mots)", "emoji": "🧠", "color": "#FFD700", "effect": "zoom"},
+    {"type": "fact", "text": "Fait 1 (15-20 mots)", "emoji": "1️⃣", "color": "#FFFFFF", "effect": "shake"},
+    {"type": "fact", "text": "Fait 2 (15-20 mots)", "emoji": "2️⃣", "color": "#FFFFFF", "effect": "flash"},
+    {"type": "fact", "text": "Fait 3 (15-20 mots)", "emoji": "3️⃣", "color": "#FFFFFF", "effect": "zoom"},
+    {"type": "cta", "text": "CTA engageant (8-10 mots)", "emoji": "🔥", "color": "#00FFFF", "effect": "none"}
   ]
 }
 
 REGLES STRICTES :
-- Hook : question rhetorique choc OU fait contre-intuitif avec chiffre precis
-- Faits : courts, percutants, avec des chiffres ou exemples concrets
-- CTA : incite subtilement a s abonner ou a reagir
-- Le texte doit etre en francais, style conversationnel et energique
-- PAS de markdown dans le JSON, PAS de sauts de ligne dans les textes
-- Reponds UNIQUEMENT avec le JSON, rien d autre avant ou apres"""
+- Hook : question choc OU fait contre-intuitif
+- Faits : courts, percutants, avec chiffres
+- CTA : incite a sabonner
+- PAS de markdown dans le JSON
+- Reponds UNIQUEMENT avec le JSON"""
 
     user_prompt = f"Sujet du Short : {topic}"
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Content-Type": "application/json"}
 
     payload = {
-        "model": "llama-3.1-8b-instant",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "temperature": 0.85,
-        "max_tokens": 800
+        "contents": [{
+            "parts": [{
+                "text": system_prompt + "\n\n" + user_prompt
+            }]
+        }],
+        "generationConfig": {
+            "temperature": 0.9,
+            "maxOutputTokens": 800
+        }
     }
 
     try:
-        response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=30)
+        url = f"{GEMINI_API_URL}?key={GEMINI_API_KEY}"
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
-        content = data["choices"][0]["message"]["content"]
+
+        content = data["candidates"][0]["content"]["parts"][0]["text"]
 
         content = content.strip()
         if content.startswith("```json"):
@@ -159,10 +171,10 @@ REGLES STRICTES :
         return script, None
 
     except Exception as e:
-        return None, f"Erreur Groq: {str(e)}"
+        return None, f"Erreur Gemini: {str(e)}"
 
 # ============================================
-# 2. GENERATION AUDIO (Edge TTS)
+# 2. GENERATION AUDIO (Edge TTS - GRATUIT)
 # ============================================
 
 async def generate_audio_async(text, output_path, voice="fr-FR-DeniseNeural"):
@@ -178,7 +190,7 @@ def generate_audio(text, output_path):
 
 def fetch_images(topic, count=5):
     if not PEXELS_API_KEY:
-        return None, "Cle API Pexels manquante. Ajoute-la dans les variables d'environnement ou dans secrets.json"
+        return None, "Cle API Pexels manquante."
 
     search_query = topic.replace("pourquoi", "").replace("comment", "").strip()
     if len(search_query) < 3:
@@ -216,16 +228,32 @@ def fetch_images(topic, count=5):
         return None, f"Erreur Pexels: {str(e)}"
 
 # ============================================
-# 4. CREATION VIDEO (MoviePy)
+# 4. CREATION VIDEO (MoviePy - Montages DYNAMIQUES)
 # ============================================
 
-def create_ken_burns_clip(image_path, duration):
+def create_ken_burns_clip(image_path, duration, zoom_direction="in"):
     clip = ImageClip(image_path).set_duration(duration)
-    def zoom_func(t):
-        return 1.0 + 0.18 * (t / duration)
+    if zoom_direction == "in":
+        def zoom_func(t):
+            return 1.0 + 0.22 * (t / duration)
+    elif zoom_direction == "out":
+        def zoom_func(t):
+            return 1.22 - 0.22 * (t / duration)
+    else:
+        def zoom_func(t):
+            return 1.1
     clip = clip.resize(zoom_func)
     clip = clip.set_position("center")
     return clip
+
+def apply_shake(clip, intensity=3):
+    def shake_func(t):
+        import random
+        random.seed(int(t * 100))
+        dx = random.randint(-intensity, intensity)
+        dy = random.randint(-intensity, intensity)
+        return (dx, dy)
+    return clip.set_position(shake_func)
 
 def create_video(script, audio_path, image_paths, output_path):
     segments = script["segments"]
@@ -243,44 +271,78 @@ def create_video(script, audio_path, image_paths, output_path):
 
     clips = []
     current_time = 0
+    zoom_directions = ["in", "out", "in", "out", "pan"]
 
     for i, (seg, seg_dur) in enumerate(zip(segments, seg_durations)):
         img_path = image_paths[i % len(image_paths)]
-        bg = create_ken_burns_clip(img_path, seg_dur)
+        direction = zoom_directions[i % len(zoom_directions)]
+        bg = create_ken_burns_clip(img_path, seg_dur, direction)
 
         if i > 0:
-            flash = ColorClip(size=(W, H), color=(255, 255, 255)).set_duration(0.06)
-            flash = flash.set_opacity(0.25)
-            clips.append(flash)
-            current_time += 0.06
+            effect = seg.get("effect", "none")
+            if effect == "flash":
+                flash = ColorClip(size=(W, H), color=(255, 255, 255)).set_duration(0.08)
+                flash = flash.set_opacity(0.3)
+                clips.append(flash)
+                current_time += 0.08
+            elif effect == "shake":
+                shake_trans = ColorClip(size=(W, H), color=(20, 20, 30)).set_duration(0.15)
+                clips.append(shake_trans)
+                current_time += 0.15
+            else:
+                zoom_trans = ColorClip(size=(W, H), color=(0, 0, 0)).set_duration(0.05)
+                clips.append(zoom_trans)
+                current_time += 0.05
 
         emoji_clip = TextClip(
             seg["emoji"],
-            fontsize=90,
+            fontsize=100,
             color="white",
             font="DejaVu-Sans-Bold" if FONT_PATH else "Arial-Bold",
             stroke_color="black",
-            stroke_width=2
-        ).set_duration(seg_dur).set_position(("center", 120))
+            stroke_width=3
+        ).set_duration(seg_dur).set_position(("center", 100))
 
-        txt_bg = ColorClip(size=(980, 350), color=(0, 0, 0))
-        txt_bg = txt_bg.set_opacity(0.55).set_duration(seg_dur)
+        if seg["type"] == "hook":
+            bg_color = (255, 50, 50)
+            bg_opacity = 0.35
+        elif seg["type"] == "cta":
+            bg_color = (0, 150, 255)
+            bg_opacity = 0.35
+        else:
+            bg_color = (0, 0, 0)
+            bg_opacity = 0.55
+
+        txt_bg = ColorClip(size=(1000, 380), color=bg_color)
+        txt_bg = txt_bg.set_opacity(bg_opacity).set_duration(seg_dur)
         txt_bg = txt_bg.set_position("center")
 
         color = seg.get("color", "#FFFFFF")
-        wrapped_text = "\n".join(textwrap.wrap(seg["text"], width=18))
+        wrapped_text = "\n".join(textwrap.wrap(seg["text"], width=17))
+
+        text_len = len(seg["text"])
+        if text_len < 30:
+            font_size = 72
+        elif text_len < 60:
+            font_size = 64
+        else:
+            font_size = 56
 
         txt_clip = TextClip(
             wrapped_text,
-            fontsize=62,
+            fontsize=font_size,
             color=color,
             stroke_color="black",
-            stroke_width=3,
+            stroke_width=4,
             font="DejaVu-Sans-Bold" if FONT_PATH else "Arial-Bold",
-            size=(900, None),
+            size=(950, None),
             method="caption",
             align="center"
         ).set_duration(seg_dur).set_position("center")
+
+        effect = seg.get("effect", "none")
+        if effect == "shake":
+            txt_clip = apply_shake(txt_clip, intensity=4)
 
         extra_clips = [bg, txt_bg, txt_clip, emoji_clip]
 
@@ -288,19 +350,30 @@ def create_video(script, audio_path, image_paths, output_path):
             fact_num = sum(1 for s in segments[:i+1] if s["type"] == "fact")
             counter = TextClip(
                 str(fact_num),
-                fontsize=280,
+                fontsize=320,
                 color=(255, 255, 255),
                 font="DejaVu-Sans-Bold" if FONT_PATH else "Arial-Bold",
                 stroke_color="black",
-                stroke_width=4
-            ).set_duration(seg_dur).set_position((750, 200))
-            counter = counter.set_opacity(0.15)
+                stroke_width=5
+            ).set_duration(seg_dur).set_position((50, 150))
+            counter = counter.set_opacity(0.12)
             extra_clips.append(counter)
 
         progress_width = int(W * ((current_time + seg_dur) / total_duration))
-        progress_bar = ColorClip(size=(progress_width, 18), color=(255, 50, 50))
-        progress_bar = progress_bar.set_duration(seg_dur).set_position(("left", H - 18))
+        progress_bar = ColorClip(size=(progress_width, 22), color=(255, 80, 80))
+        progress_bar = progress_bar.set_duration(seg_dur).set_position(("left", H - 22))
         extra_clips.append(progress_bar)
+
+        time_left = int(total_duration - current_time - seg_dur)
+        time_text = TextClip(
+            f"{time_left}s",
+            fontsize=35,
+            color=(255, 255, 255),
+            font="DejaVu-Sans-Bold" if FONT_PATH else "Arial-Bold",
+            stroke_color="black",
+            stroke_width=2
+        ).set_duration(seg_dur).set_position((W - 120, 50))
+        extra_clips.append(time_text)
 
         segment = CompositeVideoClip(extra_clips, size=(W, H))
         segment = segment.set_duration(seg_dur)
@@ -335,31 +408,31 @@ def create_video(script, audio_path, image_paths, output_path):
 # ============================================
 
 def create_thumbnail(title, image_paths, output_path):
-    thumb = Image.new("RGB", (W, H), (20, 20, 30))
+    thumb = Image.new("RGB", (W, H), (15, 15, 25))
     draw = ImageDraw.Draw(thumb)
 
     if image_paths:
         bg_img = Image.open(image_paths[0]).convert("RGB")
         bg_img = bg_img.resize((W, H), Image.LANCZOS)
-        bg_img = bg_img.filter(ImageFilter.GaussianBlur(radius=15))
+        bg_img = bg_img.filter(ImageFilter.GaussianBlur(radius=18))
         enhancer = ImageEnhance.Brightness(bg_img)
-        bg_img = enhancer.enhance(0.4)
+        bg_img = enhancer.enhance(0.35)
         thumb.paste(bg_img)
 
     for y in range(H):
-        alpha = int(180 * (y / H))
+        alpha = int(200 * (y / H))
         draw.line([(0, y), (W, y)], fill=(0, 0, 0, alpha))
 
     try:
-        font_title = ImageFont.truetype(FONT_PATH, 110) if FONT_PATH else ImageFont.load_default()
-        font_sub = ImageFont.truetype(FONT_PATH, 50) if FONT_PATH else ImageFont.load_default()
-        font_emoji = ImageFont.truetype(FONT_PATH, 200) if FONT_PATH else ImageFont.load_default()
+        font_title = ImageFont.truetype(FONT_PATH, 120) if FONT_PATH else ImageFont.load_default()
+        font_sub = ImageFont.truetype(FONT_PATH, 55) if FONT_PATH else ImageFont.load_default()
+        font_emoji = ImageFont.truetype(FONT_PATH, 220) if FONT_PATH else ImageFont.load_default()
     except:
         font_title = ImageFont.load_default()
         font_sub = ImageFont.load_default()
         font_emoji = ImageFont.load_default()
 
-    draw.text((W//2, 250), "🧠", fill=(255, 215, 0), font=font_emoji, anchor="mm")
+    draw.text((W//2, 220), "🧠", fill=(255, 215, 0), font=font_emoji, anchor="mm")
 
     title_upper = title.upper()
     words = title_upper.split()
@@ -368,7 +441,7 @@ def create_thumbnail(title, image_paths, output_path):
     for word in words:
         test_line = " ".join(current_line + [word])
         bbox = draw.textbbox((0, 0), test_line, font=font_title)
-        if bbox[2] - bbox[0] < 900:
+        if bbox[2] - bbox[0] < 950:
             current_line.append(word)
         else:
             if current_line:
@@ -377,18 +450,18 @@ def create_thumbnail(title, image_paths, output_path):
     if current_line:
         lines.append(" ".join(current_line))
 
-    y_pos = 500
+    y_pos = 480
     for line in lines:
-        for dx in [-4, -3, -2, -1, 0, 1, 2, 3, 4]:
-            for dy in [-4, -3, -2, -1, 0, 1, 2, 3, 4]:
-                if abs(dx) + abs(dy) <= 4:
+        for dx in [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]:
+            for dy in [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]:
+                if abs(dx) + abs(dy) <= 5:
                     draw.text((W//2 + dx, y_pos + dy), line, fill=(0, 0, 0), font=font_title, anchor="mm")
         draw.text((W//2, y_pos), line, fill=(255, 255, 255), font=font_title, anchor="mm")
-        y_pos += 140
+        y_pos += 150
 
-    draw.text((W//2, y_pos + 40), "FAIT SCIENTIFIQUE", fill=(255, 215, 0), font=font_sub, anchor="mm")
-    draw.rectangle([290, y_pos + 100, 790, y_pos + 108], fill=(255, 50, 50))
-    draw.text((W//2, H - 200), "⚡", fill=(255, 215, 0), font=font_emoji, anchor="mm")
+    draw.text((W//2, y_pos + 50), "FAIT SCIENTIFIQUE", fill=(255, 215, 0), font=font_sub, anchor="mm")
+    draw.rectangle([250, y_pos + 120, 830, y_pos + 132], fill=(255, 60, 60))
+    draw.text((W//2, H - 180), "⚡", fill=(255, 215, 0), font=font_emoji, anchor="mm")
 
     thumb.save(output_path, quality=95)
     return output_path
@@ -406,28 +479,31 @@ def main():
     )
 
     st.markdown("<h1 style='text-align:center; font-size:2.2rem; font-weight:900;'>🧠 SHORTS VIRAUX</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:gray; margin-bottom:2rem;'>Cerveau & Psychologie · 100% Automatique</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:gray; margin-bottom:2rem;'>Cerveau & Psychologie · Voix IA Gratuite · 100% Automatique</p>", unsafe_allow_html=True)
 
-    if not GROQ_API_KEY or not PEXELS_API_KEY:
+    missing = []
+    if not GEMINI_API_KEY:
+        missing.append("GEMINI_API_KEY")
+    if not PEXELS_API_KEY:
+        missing.append("PEXELS_API_KEY")
+
+    if missing:
         st.warning("Configuration requise")
         with st.expander("Comment configurer les cles API"):
-            st.markdown("""
-            **1. Groq API** (gratuit) :
-            - Va sur groq.com
-            - Cree un compte → API Keys → Create API Key
-            - Copie la cle
+            st.markdown(f"""
+            **Cles manquantes :** {', '.join(missing)}
+
+            **1. Gemini API** (gratuit) :
+            - Va sur aistudio.google.com/app/apikey
+            - Cree une cle API
 
             **2. Pexels API** (gratuit) :
             - Va sur pexels.com/api
-            - Join → API Key → copie la cle
+            - Join → API Key
 
             **3. Dans Render :**
-            - Va dans Settings → Environment Variables
-            - Ajoute : GROQ_API_KEY et PEXELS_API_KEY
-
-            **3b. Dans Replit :**
-            - Cree un fichier secrets.json avec :
-            {"GROQ_API_KEY": "ta_cle", "PEXELS_API_KEY": "ta_cle"}
+            - Settings → Environment Variables
+            - Ajoute chaque cle
             """)
         st.stop()
 
@@ -465,7 +541,7 @@ def main():
 
             st.success(f"Script genere : **{script['title']}**")
 
-            status.info("Etape 2/5 : Generation de la voix off...")
+            status.info("Etape 2/5 : Generation de la voix off (Edge TTS)...")
             progress_bar.progress(30)
             full_text = " ".join([seg["text"] for seg in script["segments"]])
             audio_path = os.path.join(TEMP_DIR, "voice.mp3")
@@ -519,7 +595,7 @@ def main():
                         use_container_width=True
                     )
 
-            st.info("Telecharge la video et la miniature, puis upload-les manuellement sur YouTube Shorts ou TikTok depuis ton telephone.")
+            st.info("Telecharge la video et la miniature, puis upload-les manuellement sur YouTube Shorts ou TikTok.")
 
         except Exception as e:
             st.error(f"Une erreur est survenue : {str(e)}")
@@ -527,4 +603,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
