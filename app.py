@@ -1,9 +1,9 @@
 """
 SHORTS VIRAUX - Generateur Automatique
 Niche: Cerveau, Psychologie & Faits Fascinants
-Voix: Edge TTS (gratuit, voix fr-FR-DeniseNeural)
-LLM: Gemini API
-Ton: Jeune, moderne, naturel, respectueux des valeurs islamiques
+Voix: Edge TTS (gratuit)
+LLM: Gemini API (URL corrigee pour clés AQ)
+Interface: Moderne, glassmorphism, animations
 Deployable sur Render
 """
 
@@ -38,7 +38,8 @@ try:
 except:
     pass
 
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+# URL corrigee pour les cles AQ (OAuth/App Default)
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 W, H = 1080, 1920
 FPS = 30
@@ -62,6 +63,169 @@ NICHE_TOPICS = [
     "le cerveau des gens creatifs est different",
     "pourquoi tu ne peux pas te concentrer plus de 20 minutes",
 ]
+
+# ============================================
+# CSS MODERNE - INTERFACE GLASSMORPHISM
+# ============================================
+
+CUSTOM_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
+
+.stApp {
+    background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+    font-family: 'Inter', sans-serif;
+}
+
+/* Glassmorphism cards */
+.glass-card {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 24px;
+    padding: 24px;
+    margin: 16px 0;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* Neon glow title */
+.neon-title {
+    font-size: 3rem;
+    font-weight: 900;
+    text-align: center;
+    color: #fff;
+    text-shadow: 0 0 20px rgba(147, 51, 234, 0.5),
+                 0 0 40px rgba(147, 51, 234, 0.3),
+                 0 0 60px rgba(147, 51, 234, 0.1);
+    margin-bottom: 8px;
+    letter-spacing: -2px;
+}
+
+.neon-subtitle {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 1rem;
+    font-weight: 400;
+    margin-bottom: 32px;
+}
+
+/* Modern button */
+.stButton > button {
+    width: 100%;
+    height: 56px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    border-radius: 16px;
+    border: none;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(102, 126, 234, 0.6);
+}
+
+.stButton > button:active {
+    transform: translateY(0);
+}
+
+/* Secondary button */
+.secondary-btn > button {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: none;
+}
+
+.secondary-btn > button:hover {
+    background: rgba(255, 255, 255, 0.15);
+    box-shadow: 0 4px 20px rgba(255, 255, 255, 0.1);
+}
+
+/* Input field */
+.stTextInput > div > div > input {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    color: white;
+    padding: 16px 20px;
+    font-size: 1rem;
+}
+
+.stTextInput > div > div > input::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* Progress bar */
+.stProgress > div > div {
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    border-radius: 10px;
+    height: 8px;
+}
+
+/* Info/Warning boxes */
+.stAlert {
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Expander */
+.streamlit-expanderHeader {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: white;
+}
+
+/* Video container */
+video {
+    border-radius: 20px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* Image container */
+img {
+    border-radius: 20px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* Divider */
+hr {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.2) 50%, transparent 100%);
+    margin: 32px 0;
+}
+
+/* Download buttons */
+.stDownloadButton > button {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    color: white;
+    font-weight: 600;
+}
+
+.stDownloadButton > button:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Spinner */
+.stSpinner > div {
+    border-top-color: #667eea !important;
+}
+
+/* Hide default Streamlit elements */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+</style>
+"""
 
 # ============================================
 # FONCTIONS UTILITAIRES
@@ -467,7 +631,7 @@ def create_thumbnail(title, image_paths, output_path):
     return output_path
 
 # ============================================
-# 6. INTERFACE STREAMLIT
+# 6. INTERFACE STREAMLIT - MODERNE
 # ============================================
 
 def main():
@@ -478,9 +642,14 @@ def main():
         initial_sidebar_state="collapsed"
     )
 
-    st.markdown("<h1 style='text-align:center; font-size:2.2rem; font-weight:900;'>🧠 SHORTS VIRAUX</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:gray; margin-bottom:2rem;'>Cerveau & Psychologie · Voix IA Gratuite · 100% Automatique</p>", unsafe_allow_html=True)
+    # Inject CSS
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+    # Header
+    st.markdown("<div class='neon-title'>🧠 SHORTS VIRAUX</div>", unsafe_allow_html=True)
+    st.markdown("<div class='neon-subtitle'>Cerveau & Psychologie · Genere des Shorts viraux en un clic</div>", unsafe_allow_html=True)
+
+    # Config check
     missing = []
     if not GEMINI_API_KEY:
         missing.append("GEMINI_API_KEY")
@@ -488,118 +657,147 @@ def main():
         missing.append("PEXELS_API_KEY")
 
     if missing:
-        st.warning("Configuration requise")
-        with st.expander("Comment configurer les cles API"):
-            st.markdown(f"""
-            **Cles manquantes :** {', '.join(missing)}
+        with st.container():
+            st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+            st.warning("Configuration requise")
+            with st.expander("Comment configurer les cles API"):
+                st.markdown(f"""
+                **Cles manquantes :** {', '.join(missing)}
 
-            **1. Gemini API** (gratuit) :
-            - Va sur aistudio.google.com/app/apikey
-            - Cree une cle API
+                **1. Gemini API** (gratuit) :
+                - Va sur aistudio.google.com/app/apikey
+                - Cree une cle API (commence par AIzaSy... ou AQ...)
 
-            **2. Pexels API** (gratuit) :
-            - Va sur pexels.com/api
-            - Join → API Key
+                **2. Pexels API** (gratuit) :
+                - Va sur pexels.com/api
+                - Join → API Key
 
-            **3. Dans Render :**
-            - Settings → Environment Variables
-            - Ajoute chaque cle
-            """)
+                **3. Dans Render :**
+                - Settings → Environment Variables
+                - Ajoute chaque cle
+                """)
+            st.markdown("</div>", unsafe_allow_html=True)
         st.stop()
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        topic = st.text_input(
-            "Sujet du Short (optionnel)",
-            placeholder="Ex: pourquoi tu procrastines",
-            label_visibility="collapsed"
+    # Input section
+    with st.container():
+        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            topic = st.text_input(
+                "Sujet du Short",
+                placeholder="Ex: pourquoi tu procrastines",
+                label_visibility="collapsed"
+            )
+        with col2:
+            st.markdown("<div class='secondary-btn'>", unsafe_allow_html=True)
+            random_topic = st.button("🎲 Aleatoire", use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        if random_topic or not topic:
+            topic = random.choice(NICHE_TOPICS)
+            st.info(f"Sujet choisi : **{topic}**")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # Generate button
+    with st.container():
+        st.markdown("<div class='glass-card' style='padding: 8px;'>", unsafe_allow_html=True)
+        generate_btn = st.button(
+            "🎬 GENERER MON SHORT",
+            type="primary",
+            use_container_width=True
         )
-    with col2:
-        random_topic = st.button("🎲 Aleatoire", use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    if random_topic or not topic:
-        topic = random.choice(NICHE_TOPICS)
-        st.info(f"Sujet choisi : **{topic}**")
-
-    generate_btn = st.button(
-        "🎬 GENERER MON SHORT",
-        type="primary",
-        use_container_width=True
-    )
-
+    # Generation process
     if generate_btn and topic:
-        progress_bar = st.progress(0)
-        status = st.empty()
+        with st.container():
+            st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+            progress_bar = st.progress(0)
+            status = st.empty()
 
-        try:
-            status.info("Etape 1/5 : Generation du script viral...")
-            progress_bar.progress(10)
-            script, error = generate_script(topic)
-            if error:
-                st.error(error)
-                st.stop()
+            try:
+                status.info("📝 Generation du script viral...")
+                progress_bar.progress(10)
+                script, error = generate_script(topic)
+                if error:
+                    st.error(error)
+                    st.stop()
 
-            st.success(f"Script genere : **{script['title']}**")
+                st.success(f"✅ Script genere : **{script['title']}**")
 
-            status.info("Etape 2/5 : Generation de la voix off (Edge TTS)...")
-            progress_bar.progress(30)
-            full_text = " ".join([seg["text"] for seg in script["segments"]])
-            audio_path = os.path.join(TEMP_DIR, "voice.mp3")
-            generate_audio(full_text, audio_path)
+                status.info("🔊 Generation de la voix off...")
+                progress_bar.progress(30)
+                full_text = " ".join([seg["text"] for seg in script["segments"]])
+                audio_path = os.path.join(TEMP_DIR, "voice.mp3")
+                generate_audio(full_text, audio_path)
 
-            status.info("Etape 3/5 : Recherche d'images...")
-            progress_bar.progress(50)
-            image_paths, error = fetch_images(topic, count=5)
-            if error:
-                st.error(error)
-                st.stop()
+                status.info("🖼 Recherche d'images...")
+                progress_bar.progress(50)
+                image_paths, error = fetch_images(topic, count=5)
+                if error:
+                    st.error(error)
+                    st.stop()
 
-            status.info("Etape 4/5 : Montage video dynamique...")
-            progress_bar.progress(65)
-            video_path = os.path.join(TEMP_DIR, "short.mp4")
-            create_video(script, audio_path, image_paths, video_path)
+                status.info("🎞 Montage video dynamique...")
+                progress_bar.progress(65)
+                video_path = os.path.join(TEMP_DIR, "short.mp4")
+                create_video(script, audio_path, image_paths, video_path)
 
-            status.info("Etape 5/5 : Creation de la miniature...")
-            progress_bar.progress(85)
-            thumb_path = os.path.join(TEMP_DIR, "thumbnail.jpg")
-            create_thumbnail(script["title"], image_paths, thumb_path)
+                status.info("🖼 Creation de la miniature...")
+                progress_bar.progress(85)
+                thumb_path = os.path.join(TEMP_DIR, "thumbnail.jpg")
+                create_thumbnail(script["title"], image_paths, thumb_path)
 
-            progress_bar.progress(100)
-            status.success("Short genere avec succes !")
+                progress_bar.progress(100)
+                status.success("🎉 Short genere avec succes !")
+                st.markdown("</div>", unsafe_allow_html=True)
 
-            st.divider()
-            st.subheader("Previsualisation")
+                # Results
+                st.markdown("<hr>", unsafe_allow_html=True)
 
-            st.video(video_path)
+                with st.container():
+                    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+                    st.subheader("📺 Previsualisation")
+                    st.video(video_path)
+                    st.markdown("</div>", unsafe_allow_html=True)
 
-            st.subheader("Miniature")
-            st.image(thumb_path, use_column_width=True)
+                with st.container():
+                    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+                    st.subheader("🖼 Miniature")
+                    st.image(thumb_path, use_column_width=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
 
-            col_dl1, col_dl2 = st.columns(2)
-            with col_dl1:
-                with open(video_path, "rb") as file:
-                    st.download_button(
-                        label="Telecharger la video",
-                        data=file,
-                        file_name=f"short_{script['title'].replace(' ', '_')}.mp4",
-                        mime="video/mp4",
-                        use_container_width=True
-                    )
-            with col_dl2:
-                with open(thumb_path, "rb") as file:
-                    st.download_button(
-                        label="Telecharger la miniature",
-                        data=file,
-                        file_name=f"thumb_{script['title'].replace(' ', '_')}.jpg",
-                        mime="image/jpeg",
-                        use_container_width=True
-                    )
+                with st.container():
+                    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+                    col_dl1, col_dl2 = st.columns(2)
+                    with col_dl1:
+                        with open(video_path, "rb") as file:
+                            st.download_button(
+                                label="📥 Video",
+                                data=file,
+                                file_name=f"short_{script['title'].replace(' ', '_')}.mp4",
+                                mime="video/mp4",
+                                use_container_width=True
+                            )
+                    with col_dl2:
+                        with open(thumb_path, "rb") as file:
+                            st.download_button(
+                                label="📥 Miniature",
+                                data=file,
+                                file_name=f"thumb_{script['title'].replace(' ', '_')}.jpg",
+                                mime="image/jpeg",
+                                use_container_width=True
+                            )
+                    st.markdown("</div>", unsafe_allow_html=True)
 
-            st.info("Telecharge la video et la miniature, puis upload-les manuellement sur YouTube Shorts ou TikTok.")
+                st.info("💡 Telecharge les fichiers et upload-les sur YouTube Shorts ou TikTok.")
 
-        except Exception as e:
-            st.error(f"Une erreur est survenue : {str(e)}")
-            st.exception(e)
+            except Exception as e:
+                st.error(f"❌ Erreur : {str(e)}")
+                st.exception(e)
+                st.markdown("</div>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
