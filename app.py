@@ -2,8 +2,8 @@
 SHORTS VIRAUX - Generateur Automatique
 Niche: Cerveau, Psychologie & Faits Fascinants
 Voix: Edge TTS (gratuit)
-LLM: Gemini API (URL corrigee pour clés AQ)
-Interface: Moderne, glassmorphism, animations
+LLM: Groq API (Llama 3, gratuit)
+Interface: Moderne, glassmorphism
 Deployable sur Render
 """
 
@@ -27,19 +27,19 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 # ============================================
 
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 # Fallback secrets.json
 try:
     with open("secrets.json", "r") as f2:
         secrets = json.load(f2)
         PEXELS_API_KEY = secrets.get("PEXELS_API_KEY", PEXELS_API_KEY)
-        GEMINI_API_KEY = secrets.get("GEMINI_API_KEY", GEMINI_API_KEY)
+        GROQ_API_KEY = secrets.get("GROQ_API_KEY", GROQ_API_KEY)
 except:
     pass
 
-# URL corrigee pour les cles AQ (OAuth/App Default)
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+# URL CORRIGEE GROQ
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 W, H = 1080, 1920
 FPS = 30
@@ -77,7 +77,6 @@ CUSTOM_CSS = """
     font-family: 'Inter', sans-serif;
 }
 
-/* Glassmorphism cards */
 .glass-card {
     background: rgba(255, 255, 255, 0.05);
     backdrop-filter: blur(20px);
@@ -88,7 +87,6 @@ CUSTOM_CSS = """
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
-/* Neon glow title */
 .neon-title {
     font-size: 3rem;
     font-weight: 900;
@@ -109,7 +107,6 @@ CUSTOM_CSS = """
     margin-bottom: 32px;
 }
 
-/* Modern button */
 .stButton > button {
     width: 100%;
     height: 56px;
@@ -134,7 +131,6 @@ CUSTOM_CSS = """
     transform: translateY(0);
 }
 
-/* Secondary button */
 .secondary-btn > button {
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
@@ -146,7 +142,6 @@ CUSTOM_CSS = """
     box-shadow: 0 4px 20px rgba(255, 255, 255, 0.1);
 }
 
-/* Input field */
 .stTextInput > div > div > input {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -160,21 +155,18 @@ CUSTOM_CSS = """
     color: rgba(255, 255, 255, 0.4);
 }
 
-/* Progress bar */
 .stProgress > div > div {
     background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
     border-radius: 10px;
     height: 8px;
 }
 
-/* Info/Warning boxes */
 .stAlert {
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(255, 255, 255, 0.05) !important;
 }
 
-/* Expander */
 .streamlit-expanderHeader {
     background: rgba(255, 255, 255, 0.05);
     border-radius: 16px;
@@ -182,19 +174,11 @@ CUSTOM_CSS = """
     color: white;
 }
 
-/* Video container */
-video {
+video, img {
     border-radius: 20px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
-/* Image container */
-img {
-    border-radius: 20px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-}
-
-/* Divider */
 hr {
     border: none;
     height: 1px;
@@ -202,7 +186,6 @@ hr {
     margin: 32px 0;
 }
 
-/* Download buttons */
 .stDownloadButton > button {
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
@@ -215,15 +198,7 @@ hr {
     background: rgba(255, 255, 255, 0.2);
 }
 
-/* Spinner */
-.stSpinner > div {
-    border-top-color: #667eea !important;
-}
-
-/* Hide default Streamlit elements */
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-header {visibility: hidden;}
+#MainMenu, footer, header {visibility: hidden;}
 </style>
 """
 
@@ -255,12 +230,12 @@ def get_font_path():
 FONT_PATH = get_font_path()
 
 # ============================================
-# 1. GENERATION DU SCRIPT (Gemini API)
+# 1. GENERATION DU SCRIPT (Groq API)
 # ============================================
 
 def generate_script(topic):
-    if not GEMINI_API_KEY:
-        return None, "Cle API Gemini manquante."
+    if not GROQ_API_KEY:
+        return None, "Cle API Groq manquante."
 
     system_prompt = """Tu es un createur de contenu viral sur TikTok/YouTube Shorts, specialise dans la niche "cerveau, psychologie et faits fascinants".
 
@@ -300,27 +275,26 @@ REGLES STRICTES :
 
     user_prompt = f"Sujet du Short : {topic}"
 
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
     payload = {
-        "contents": [{
-            "parts": [{
-                "text": system_prompt + "\n\n" + user_prompt
-            }]
-        }],
-        "generationConfig": {
-            "temperature": 0.9,
-            "maxOutputTokens": 800
-        }
+        "model": "llama-3.1-8b-instant",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": 0.9,
+        "max_tokens": 800
     }
 
     try:
-        url = f"{GEMINI_API_URL}?key={GEMINI_API_KEY}"
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
-
-        content = data["candidates"][0]["content"]["parts"][0]["text"]
+        content = data["choices"][0]["message"]["content"]
 
         content = content.strip()
         if content.startswith("```json"):
@@ -335,7 +309,7 @@ REGLES STRICTES :
         return script, None
 
     except Exception as e:
-        return None, f"Erreur Gemini: {str(e)}"
+        return None, f"Erreur Groq: {str(e)}"
 
 # ============================================
 # 2. GENERATION AUDIO (Edge TTS - GRATUIT)
@@ -642,17 +616,14 @@ def main():
         initial_sidebar_state="collapsed"
     )
 
-    # Inject CSS
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-    # Header
     st.markdown("<div class='neon-title'>🧠 SHORTS VIRAUX</div>", unsafe_allow_html=True)
     st.markdown("<div class='neon-subtitle'>Cerveau & Psychologie · Genere des Shorts viraux en un clic</div>", unsafe_allow_html=True)
 
-    # Config check
     missing = []
-    if not GEMINI_API_KEY:
-        missing.append("GEMINI_API_KEY")
+    if not GROQ_API_KEY:
+        missing.append("GROQ_API_KEY")
     if not PEXELS_API_KEY:
         missing.append("PEXELS_API_KEY")
 
@@ -664,9 +635,10 @@ def main():
                 st.markdown(f"""
                 **Cles manquantes :** {', '.join(missing)}
 
-                **1. Gemini API** (gratuit) :
-                - Va sur aistudio.google.com/app/apikey
-                - Cree une cle API (commence par AIzaSy... ou AQ...)
+                **1. Groq API** (gratuit) :
+                - Va sur groq.com
+                - Cree un compte → API Keys → Create API Key
+                - Copie la cle (commence par gsk_...)
 
                 **2. Pexels API** (gratuit) :
                 - Va sur pexels.com/api
@@ -679,7 +651,6 @@ def main():
             st.markdown("</div>", unsafe_allow_html=True)
         st.stop()
 
-    # Input section
     with st.container():
         st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
         col1, col2 = st.columns([3, 1])
@@ -700,7 +671,6 @@ def main():
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Generate button
     with st.container():
         st.markdown("<div class='glass-card' style='padding: 8px;'>", unsafe_allow_html=True)
         generate_btn = st.button(
@@ -710,7 +680,6 @@ def main():
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Generation process
     if generate_btn and topic:
         with st.container():
             st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
@@ -754,7 +723,6 @@ def main():
                 status.success("🎉 Short genere avec succes !")
                 st.markdown("</div>", unsafe_allow_html=True)
 
-                # Results
                 st.markdown("<hr>", unsafe_allow_html=True)
 
                 with st.container():
