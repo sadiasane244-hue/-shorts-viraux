@@ -2,7 +2,7 @@
 SHORTS VIRALS - Générateur Automatique
 Niche: Cerveau, Psychologie & Faits
 Voix: Edge TTS (gratuit)
-LLM: OpenRouter API (inclusionai/ling-3.0-flash-fn:free)
+LLM: OpenRouter API (openrouter/free — router auto gratuit)
 Interface: Moderne glassmorphism + Couleurs dynamiques
 Features: Auto-optimisation IA, Dashboard Analytics, Couleurs changeantes
 Deployable sur Render
@@ -22,15 +22,10 @@ import hashlib
 # CONFIGURATION - COULEURS DYNAMIQUES (CHANGE À CHAQUE MAJ)
 # ============================================================
 
-# Génère une palette de couleurs unique basée sur le hash du fichier
-# Ça change à CHAQUE modification du code → tu vois immédiatement si c'est actif
 def generate_dynamic_colors():
     """Génère une palette unique basée sur le contenu actuel du fichier"""
-    # On utilise le timestamp de modification du fichier comme seed
-    # Sur Render, chaque déploiement = nouveau fichier = nouvelles couleurs
     try:
         import inspect
-        # Récupère le contenu du fichier courant
         current_file = inspect.getfile(lambda: None)
         if os.path.exists(current_file):
             with open(current_file, 'rb') as f:
@@ -39,10 +34,9 @@ def generate_dynamic_colors():
             file_hash = str(int(time.time()))[:8]
     except:
         file_hash = str(int(time.time()))[:8]
-    
-    # Convertit le hash en couleurs HSL harmonieuses
+
     seed = int(file_hash, 16)
-    
+
     def hsl_to_hex(h, s, l):
         h = h / 360
         s = s / 100
@@ -63,10 +57,9 @@ def generate_dynamic_colors():
             g = hue_to_rgb(p, q, h)
             b = hue_to_rgb(p, q, h - 1/3)
         return f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
-    
-    # Génère une palette cohérente
+
     base_hue = (seed % 360)
-    
+
     colors = {
         'primary': hsl_to_hex(base_hue, 85, 55),
         'secondary': hsl_to_hex((base_hue + 30) % 360, 80, 60),
@@ -81,10 +74,9 @@ def generate_dynamic_colors():
         'warning': hsl_to_hex((base_hue + 60) % 360, 90, 60),
         'error': hsl_to_hex((base_hue + 0) % 360, 90, 60),
     }
-    
+
     return colors, file_hash
 
-# Génère les couleurs dynamiques
 COLORS, FILE_HASH = generate_dynamic_colors()
 
 # ============================================================
@@ -94,7 +86,7 @@ COLORS, FILE_HASH = generate_dynamic_colors()
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_MODEL = "inclusionai/ling-3.0-flash-fn:free"
+OPENROUTER_MODEL = "openrouter/free"  # Router gratuit auto
 
 # ============================================================
 # BASE DE DONNÉES JSON (stats)
@@ -131,10 +123,9 @@ def save_stats(stats):
 
 def generate_script(subject=None):
     """Génère un script viral de 45-60 secondes"""
-    
     if not OPENROUTER_API_KEY:
         return None, "❌ Clé OpenRouter manquante. Ajoute OPENROUTER_API_KEY dans les variables d'environnement Render."
-    
+
     topics = [
         "pourquoi ton cerveau oublie 80% de ce que tu lis",
         "l'effet de serreau qui te manipule sans que tu le saches",
@@ -147,10 +138,10 @@ def generate_script(subject=None):
         "pourquoi les réseaux sociaux rendent ton cerveau paresseux",
         "l'effet Dunning-Kruger expliqué simplement"
     ]
-    
+
     if not subject:
         subject = random.choice(topics)
-    
+
     system_prompt = """Tu es un expert en création de contenu viral pour YouTube Shorts et TikTok.
 Tu crées des scripts courts (45-60 secondes), captivants, éducatifs sur le cerveau et la psychologie.
 Règles STRICTES:
@@ -182,7 +173,7 @@ Le script doit être prêt à être lu à voix haute."""
         "HTTP-Referer": "https://shorts-viraux.render.com",
         "X-Title": "Shorts Viraux Generator"
     }
-    
+
     payload = {
         "model": OPENROUTER_MODEL,
         "messages": [
@@ -192,45 +183,40 @@ Le script doit être prêt à être lu à voix haute."""
         "temperature": 0.9,
         "max_tokens": 800
     }
-    
+
     try:
         response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=30)
-        
         if response.status_code == 200:
             data = response.json()
             if 'choices' in data and len(data['choices']) > 0:
                 script = data['choices'][0]['message']['content']
                 return script, None
             else:
-                return None, f"❌ Réponse vide de l'API. Réponse: {data}"
+                return None, f"❌ Réponse vide. Réponse: {data}"
         elif response.status_code == 401:
-            return None, "❌ Erreur 401: Clé API invalide. Vérifie ta clé OpenRouter sur openrouter.ai/keys"
+            return None, "❌ Erreur 401: Clé API invalide. Vérifie sur openrouter.ai/keys"
         elif response.status_code == 404:
-            return None, f"❌ Erreur 404: Modèle non trouvé. Le modèle '{OPENROUTER_MODEL}' n'est peut-être plus disponible. Essaie un autre modèle gratuit."
+            return None, f"❌ Erreur 404: Modèle non trouvé. Essaie un autre modèle gratuit."
         elif response.status_code == 429:
-            return None, "❌ Erreur 429: Trop de requêtes. Attends un peu et réessaie."
+            return None, "❌ Erreur 429: Trop de requêtes. Attends un peu."
         else:
             return None, f"❌ Erreur {response.status_code}: {response.text[:200]}"
-            
     except requests.exceptions.Timeout:
-        return None, "❌ Timeout: L'API met trop de temps à répondre. Réessaie."
+        return None, "❌ Timeout: L'API met trop de temps à répondre."
     except requests.exceptions.ConnectionError:
-        return None, "❌ Erreur de connexion. Vérifie ta connexion internet."
+        return None, "❌ Erreur de connexion."
     except Exception as e:
-        return None, f"❌ Erreur inattendue: {str(e)}"
+        return None, f"❌ Erreur: {str(e)}"
 
 # ============================================================
 # RECHERCHE D'IMAGES (PEXELS)
 # ============================================================
 
 def search_images(query, count=5):
-    """Recherche des images stock gratuites sur Pexels"""
     if not PEXELS_API_KEY:
         return []
-    
     url = f"https://api.pexels.com/v1/search?query={query}&per_page={count}&orientation=portrait"
     headers = {"Authorization": PEXELS_API_KEY}
-    
     try:
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
@@ -245,17 +231,12 @@ def search_images(query, count=5):
 # ============================================================
 
 def generate_audio(text, output_path="audio.mp3"):
-    """Génère la voix off avec Edge TTS"""
     try:
         import edge_tts
-        import asyncio
-        
-        voice = "fr-FR-DeniseNeural"  # Voix féminine française naturelle
-        
+        voice = "fr-FR-DeniseNeural"
         async def _generate():
             communicate = edge_tts.Communicate(text, voice)
             await communicate.save(output_path)
-        
         asyncio.run(_generate())
         return output_path
     except Exception as e:
@@ -266,52 +247,35 @@ def generate_audio(text, output_path="audio.mp3"):
 # ============================================================
 
 def generate_thumbnail(title, output_path="thumbnail.jpg"):
-    """Génère une miniature 9:16 optimisée"""
     try:
         from PIL import Image, ImageDraw, ImageFont
         import textwrap
-        
-        # Dimensions 9:16 (1080x1920)
         width, height = 1080, 1920
         img = Image.new('RGB', (width, height), COLORS['gradient_start'])
         draw = ImageDraw.Draw(img)
-        
-        # Dégradé de fond
         for y in range(height):
             ratio = y / height
             r = int(int(COLORS['gradient_start'][1:3], 16) * (1-ratio) + int(COLORS['gradient_end'][1:3], 16) * ratio)
             g = int(int(COLORS['gradient_start'][3:5], 16) * (1-ratio) + int(COLORS['gradient_end'][3:5], 16) * ratio)
             b = int(int(COLORS['gradient_start'][5:7], 16) * (1-ratio) + int(COLORS['gradient_end'][5:7], 16) * ratio)
             draw.line([(0, y), (width, y)], fill=(r, g, b))
-        
-        # Titre principal
         try:
             font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 80)
             font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 40)
         except:
             font_large = ImageFont.load_default()
             font_small = ImageFont.load_default()
-        
-        # Glow effect behind text
         wrapped = textwrap.fill(title.upper(), width=12)
         bbox = draw.multilinebbox((0, 0), wrapped, font=font_large)
         text_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
         x = (width - text_w) // 2
         y = height // 3
-        
-        # Ombre portée
         for offset in range(5, 0, -1):
-            alpha = int(255 * (1 - offset/5) * 0.3)
             draw.multiline_text((x+offset, y+offset), wrapped, font=font_large, fill=(0,0,0))
-        
-        # Texte principal
         draw.multiline_text((x, y), wrapped, font=font_large, fill=COLORS['glow'])
-        
-        # Sous-titre
         subtitle = "🧠 PSYCHOLOGIE"
         draw.text((width//2 - 150, y + text_h + 50), subtitle, font=font_small, fill=COLORS['accent'])
-        
         img.save(output_path)
         return output_path
     except Exception as e:
@@ -322,38 +286,25 @@ def generate_thumbnail(title, output_path="thumbnail.jpg"):
 # ============================================================
 
 def create_video(script, images, audio_path, output_path="short.mp4"):
-    """Assemble le short final avec montage dynamique"""
     try:
         from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, CompositeVideoClip, TextClip
         import numpy as np
-        
         if not images:
-            # Fallback: créer des clips colorés
             images = [None] * 5
-        
-        # Parse le script pour extraire les segments
         segments = []
         lines = script.split('\n')
-        current_segment = {"text": "", "duration": 3}
-        
         for line in lines:
             line = line.strip()
             if line.startswith('HOOK:'):
-                current_segment = {"text": line.replace('HOOK:', '').strip(), "duration": 3, "type": "hook"}
-                segments.append(current_segment)
+                segments.append({"text": line.replace('HOOK:', '').strip(), "duration": 3, "type": "hook"})
             elif line.startswith('FAIT'):
-                current_segment = {"text": line.split(':', 1)[1].strip() if ':' in line else line, "duration": 4, "type": "fact"}
-                segments.append(current_segment)
+                segments.append({"text": line.split(':', 1)[1].strip() if ':' in line else line, "duration": 4, "type": "fact"})
             elif line.startswith('CTA:'):
-                current_segment = {"text": line.replace('CTA:', '').strip(), "duration": 3, "type": "cta"}
-                segments.append(current_segment)
-        
+                segments.append({"text": line.replace('CTA:', '').strip(), "duration": 3, "type": "cta"})
         if not segments:
             segments = [{"text": "Short viral!", "duration": 10, "type": "hook"}]
-        
         clips = []
         for i, seg in enumerate(segments):
-            # Image de fond
             if i < len(images) and images[i]:
                 try:
                     clip = ImageClip(images[i]).set_duration(seg['duration'])
@@ -361,14 +312,10 @@ def create_video(script, images, audio_path, output_path="short.mp4"):
                     clip = create_color_clip(seg['duration'])
             else:
                 clip = create_color_clip(seg['duration'])
-            
-            # Zoom dynamique (Ken Burns)
             if seg['type'] == 'hook':
                 clip = clip.resize(lambda t: 1 + 0.1 * t / seg['duration'])
             elif seg['type'] == 'fact':
                 clip = clip.resize(lambda t: 1 + 0.05 * np.sin(t * 2))
-            
-            # Texte overlay
             text = seg['text'].replace('**', '')
             try:
                 txt_clip = TextClip(text[:50], fontsize=50, color='white', 
@@ -379,29 +326,20 @@ def create_video(script, images, audio_path, output_path="short.mp4"):
                 clip = CompositeVideoClip([clip, txt_clip])
             except:
                 pass
-            
             clips.append(clip)
-        
-        # Assemble
         if clips:
             final = concatenate_videoclips(clips, method="compose")
-            
-            # Ajoute l'audio
             if audio_path and os.path.exists(audio_path):
                 audio = AudioFileClip(audio_path)
                 final = final.set_audio(audio)
-            
-            # Export
             final.write_videofile(output_path, fps=24, codec='libx264', 
                                  audio_codec='aac', threads=2,
                                  preset='ultrafast', logger=None)
             return output_path
-            
     except Exception as e:
         return None
 
 def create_color_clip(duration, color=None):
-    """Crée un clip de couleur unie"""
     try:
         from moviepy.editor import ColorClip
         if color is None:
@@ -411,11 +349,10 @@ def create_color_clip(duration, color=None):
         return None
 
 # ============================================================
-# OPTIMISATION IA (ANALYSE DES PERFORMANCES)
+# OPTIMISATION IA
 # ============================================================
 
 def analyze_viral_patterns(stats):
-    """Analyse les patterns viraux et suggère des améliorations"""
     if not stats['shorts']:
         return {
             'best_time': '18h-20h',
@@ -427,34 +364,24 @@ def analyze_viral_patterns(stats):
                 'Varie les sujets dans la niche cerveau/psychologie'
             ]
         }
-    
-    # Analyse simple basée sur les stats
     suggestions = []
-    
     if stats['avg_retention'] < 50:
         suggestions.append('🎯 Ton taux de rétention est faible. Raccourcis le hook à 2 secondes max.')
-    
     if stats['generated_count'] > 10 and stats['published_count'] < 5:
         suggestions.append('📤 Tu génères beaucoup mais publie peu. Publie plus régulièrement!')
-    
     return {
         'best_time': '18h-20h (heure de pointe)',
         'hook_style': 'Questions contre-intuitives',
         'optimal_duration': '45-55 secondes',
         'suggestions': suggestions or ['Continue sur cette lancée!']
     }
-
 # ============================================================
 # CSS PERSONNALISÉ DYNAMIQUE
 # ============================================================
 
 def get_custom_css():
-    """Génère le CSS avec les couleurs dynamiques actuelles"""
     return f"""
     <style>
-    /* ===== COULEURS DYNAMIQUES (Hash: {FILE_HASH}) ===== */
-    /* Si ce hash change = ton code a bien été mis à jour! */
-    
     :root {{
         --primary: {COLORS['primary']};
         --secondary: {COLORS['secondary']};
@@ -468,7 +395,6 @@ def get_custom_css():
         --error: {COLORS['error']};
     }}
     
-    /* Fond animé dégradé */
     .stApp {{
         background: linear-gradient(135deg, var(--gradient-start) 0%, var(--gradient-end) 50%, var(--gradient-start) 100%);
         background-size: 400% 400%;
@@ -481,7 +407,6 @@ def get_custom_css():
         100% {{ background-position: 0% 50%; }}
     }}
     
-    /* Glassmorphism cards */
     .glass-card {{
         background: var(--card-bg) !important;
         backdrop-filter: blur(20px) !important;
@@ -501,7 +426,6 @@ def get_custom_css():
                     0 0 30px rgba({int(COLORS['primary'][1:3], 16)}, {int(COLORS['primary'][3:5], 16)}, {int(COLORS['primary'][5:7], 16)}, 0.2) !important;
     }}
     
-    /* Boutons néon */
     .stButton > button {{
         background: linear-gradient(135deg, var(--primary), var(--secondary)) !important;
         color: white !important;
@@ -524,14 +448,12 @@ def get_custom_css():
                     0 6px 20px rgba(0,0,0,0.4) !important;
     }}
     
-    /* Titres avec glow */
     h1, h2, h3 {{
         color: var(--glow) !important;
         text-shadow: 0 0 20px rgba({int(COLORS['glow'][1:3], 16)}, {int(COLORS['glow'][3:5], 16)}, {int(COLORS['glow'][5:7], 16)}, 0.5) !important;
         font-weight: 800 !important;
     }}
     
-    /* Inputs stylisés */
     .stTextInput > div > div > input {{
         background: rgba(255,255,255,0.05) !important;
         border: 2px solid rgba(255,255,255,0.1) !important;
@@ -545,13 +467,11 @@ def get_custom_css():
         box-shadow: 0 0 15px rgba({int(COLORS['primary'][1:3], 16)}, {int(COLORS['primary'][3:5], 16)}, {int(COLORS['primary'][5:7], 16)}, 0.3) !important;
     }}
     
-    /* Progress bar custom */
     .stProgress > div > div > div {{
         background: linear-gradient(90deg, var(--primary), var(--accent)) !important;
         border-radius: 10px !important;
     }}
     
-    /* Tabs */
     .stTabs [data-baseweb="tab-list"] {{
         background: rgba(255,255,255,0.05) !important;
         border-radius: 15px !important;
@@ -568,7 +488,6 @@ def get_custom_css():
         color: white !important;
     }}
     
-    /* Badge de version */
     .version-badge {{
         position: fixed !important;
         top: 10px !important;
@@ -585,7 +504,6 @@ def get_custom_css():
         box-shadow: 0 0 15px rgba({int(COLORS['primary'][1:3], 16)}, {int(COLORS['primary'][3:5], 16)}, {int(COLORS['primary'][5:7], 16)}, 0.3) !important;
     }}
     
-    /* Alertes */
     .alert-success {{
         background: rgba({int(COLORS['success'][1:3], 16)}, {int(COLORS['success'][3:5], 16)}, {int(COLORS['success'][5:7], 16)}, 0.2) !important;
         border-left: 4px solid var(--success) !important;
@@ -600,13 +518,11 @@ def get_custom_css():
         border-radius: 0 10px 10px 0 !important;
     }}
     
-    /* Spinner personnalisé */
     .stSpinner > div {{
         border-color: var(--primary) !important;
         border-top-color: transparent !important;
     }}
     
-    /* Scrollbar */
     ::-webkit-scrollbar {{
         width: 8px !important;
     }}
@@ -620,21 +536,17 @@ def get_custom_css():
         border-radius: 4px !important;
     }}
     
-    /* Cache le menu hamburger et footer */
     #MainMenu {{visibility: hidden;}}
     footer {{visibility: hidden;}}
     header {{visibility: hidden;}}
     
-    /* Responsive mobile */
     @media (max-width: 768px) {{
         .glass-card {{
             padding: 15px !important;
             margin: 10px 0 !important;
         }}
-        
         h1 {{ font-size: 24px !important; }}
         h2 {{ font-size: 20px !important; }}
-        
         .stButton > button {{
             padding: 12px 20px !important;
             font-size: 14px !important;
@@ -642,7 +554,6 @@ def get_custom_css():
     }}
     </style>
     
-    <!-- Badge de version dynamique -->
     <div class="version-badge">
         🎨 v{FILE_HASH} | {COLORS['primary']}
     </div>
@@ -653,7 +564,6 @@ def get_custom_css():
 # ============================================================
 
 def main():
-    # Configuration de la page
     st.set_page_config(
         page_title="🧠 Shorts Viraux",
         page_icon="🧠",
@@ -661,16 +571,12 @@ def main():
         initial_sidebar_state="collapsed"
     )
     
-    # Injection du CSS dynamique
     st.markdown(get_custom_css(), unsafe_allow_html=True)
     
-    # Chargement des stats
     stats = load_stats()
-    
-    # Vérification des clés API
     api_ok = bool(OPENROUTER_API_KEY and PEXELS_API_KEY)
     
-    # ===== HEADER =====
+    # HEADER
     st.markdown(f"""
     <div style="text-align: center; padding: 20px 0;">
         <h1 style="font-size: 42px; margin-bottom: 5px;">🧠 SHORTS VIRALS</h1>
@@ -683,7 +589,6 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # Alertes API
     if not OPENROUTER_API_KEY:
         st.markdown(f"""
         <div class="alert-error">
@@ -701,7 +606,6 @@ def main():
         </div>
         """, unsafe_allow_html=True)
     
-    # ===== ONGLETS =====
     tabs = st.tabs(["🎬 Générateur", "📊 Dashboard", "🧠 Optimisation IA"])
     
     # ==================== ONGLET 1: GÉNÉRATEUR ====================
@@ -731,7 +635,6 @@ def main():
             progress_container = st.container()
             
             with progress_container:
-                # Étape 1: Script
                 progress_bar = st.progress(0)
                 status = st.empty()
                 
@@ -749,7 +652,6 @@ def main():
                     progress_bar.empty()
                     status.empty()
                 else:
-                    # Affiche le script
                     st.markdown(f"""
                     <div class="glass-card" style="border-left: 4px solid {COLORS['success']};">
                         <h3>✅ Script généré!</h3>
@@ -757,11 +659,9 @@ def main():
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # Étape 2: Images
                     status.markdown(f"<p style='color: {COLORS['glow']};'>🖼️ Étape 2/5: Recherche d'images...</p>", unsafe_allow_html=True)
                     progress_bar.progress(40)
                     
-                    # Extrait les mots-clés pour la recherche
                     search_query = subject if subject else "brain psychology"
                     images = search_images(search_query, count=5)
                     
@@ -770,13 +670,11 @@ def main():
                     else:
                         st.markdown(f"<p style='color: {COLORS['warning']};'>⚠️ Images fallback utilisées</p>", unsafe_allow_html=True)
                     
-                    # Étape 3: Audio
                     status.markdown(f"<p style='color: {COLORS['glow']};'>🎙️ Étape 3/5: Génération de la voix off...</p>", unsafe_allow_html=True)
                     progress_bar.progress(60)
                     
-                    # Nettoie le texte pour le TTS
                     tts_text = script.replace('**', '').replace('TITRE:', '').replace('HOOK:', '').replace('FAIT', '').replace('CTA:', '').replace('HASHTAGS:', '')
-                    tts_text = ' '.join(tts_text.split()[:100])  # Limite la longueur
+                    tts_text = ' '.join(tts_text.split()[:100])
                     
                     audio_path = generate_audio(tts_text)
                     
@@ -784,13 +682,11 @@ def main():
                         st.markdown(f"<p style='color: {COLORS['success']};'>✅ Voix off générée</p>", unsafe_allow_html=True)
                         st.audio(audio_path)
                     else:
-                        st.markdown(f"<p style='color: {COLORS['warning']};'>⚠️ Voix off non générée (Edge TTS peut nécessiter une installation)</p>", unsafe_allow_html=True)
+                        st.markdown(f"<p style='color: {COLORS['warning']};'>⚠️ Voix off non générée</p>", unsafe_allow_html=True)
                     
-                    # Étape 4: Miniature
                     status.markdown(f"<p style='color: {COLORS['glow']};'>🎨 Étape 4/5: Création de la miniature...</p>", unsafe_allow_html=True)
                     progress_bar.progress(80)
                     
-                    # Extrait le titre
                     title = "Short Viral"
                     for line in script.split('\n'):
                         if line.startswith('TITRE:'):
@@ -803,7 +699,6 @@ def main():
                         st.markdown(f"<p style='color: {COLORS['success']};'>✅ Miniature créée</p>", unsafe_allow_html=True)
                         st.image(thumb_path, caption="Miniature 9:16", use_column_width=True)
                     
-                    # Étape 5: Montage
                     status.markdown(f"<p style='color: {COLORS['glow']};'>🎬 Étape 5/5: Montage vidéo...</p>", unsafe_allow_html=True)
                     progress_bar.progress(95)
                     
@@ -829,7 +724,6 @@ def main():
                                 use_container_width=True
                             )
                         
-                        # Met à jour les stats
                         stats['generated_count'] += 1
                         stats['shorts'].append({
                             'id': int(time.time()),
@@ -845,7 +739,6 @@ def main():
                         progress_bar.progress(100)
                         status.markdown(f"<p style='color: {COLORS['warning']};'>⚠️ Montage simplifié (MoviePy peut être limité sur Render Free)</p>", unsafe_allow_html=True)
                         
-                        # Propose le téléchargement du script + audio
                         st.markdown(f"""
                         <div class="glass-card">
                             <h3>📦 Contenu généré:</h3>
@@ -853,12 +746,11 @@ def main():
                                 <li>✅ Script viral prêt à lire</li>
                                 <li>✅ Voix off (si générée)</li>
                                 <li>✅ Miniature</li>
-                                <li>⚠️ Montage vidéo: utilise CapCut ou InShot avec le script et les images</li>
+                                <li>⚠️ Montage vidéo: utilise CapCut ou InShot</li>
                             </ul>
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        # Téléchargement du script
                         st.download_button(
                             label="📄 TÉLÉCHARGER LE SCRIPT",
                             data=script,
@@ -866,7 +758,6 @@ def main():
                             mime="text/plain",
                             use_container_width=True
                         )
-    
     # ==================== ONGLET 2: DASHBOARD ====================
     with tabs[1]:
         st.markdown(f"""
@@ -876,7 +767,6 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
-        # Stats globales
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -913,7 +803,6 @@ def main():
             </div>
             """, unsafe_allow_html=True)
         
-        # Formulaire de mise à jour des stats
         st.markdown(f"""
         <div class="glass-card">
             <h3>📝 Mettre à jour les stats</h3>
@@ -937,7 +826,6 @@ def main():
                 stats['total_views'] += views
                 stats['total_subscribers'] += subscribers
                 
-                # Calcule la nouvelle moyenne de rétention
                 total_shorts = len(stats['shorts'])
                 if total_shorts > 0:
                     stats['avg_retention'] = int((stats['avg_retention'] * (total_shorts - 1) + retention) / total_shorts)
@@ -954,7 +842,6 @@ def main():
                 """, unsafe_allow_html=True)
                 st.rerun()
         
-        # Historique des shorts
         if stats['shorts']:
             st.markdown(f"""
             <div class="glass-card">
@@ -989,7 +876,6 @@ def main():
         
         analysis = analyze_viral_patterns(stats)
         
-        # Recommandations
         st.markdown(f"""
         <div class="glass-card" style="border-left: 4px solid {COLORS['accent']};">
             <h3>💡 Recommandations personnalisées</h3>
@@ -1003,7 +889,6 @@ def main():
             </div>
             """, unsafe_allow_html=True)
         
-        # Stats d'optimisation
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -1030,7 +915,6 @@ def main():
             </div>
             """, unsafe_allow_html=True)
         
-        # Auto-optimisation: génère un script amélioré
         st.markdown(f"""
         <div class="glass-card" style="margin-top: 20px;">
             <h3>✨ Générer un script optimisé</h3>
@@ -1040,7 +924,6 @@ def main():
         
         if st.button("⚡ GÉNÉRER UN SCRIPT OPTIMISÉ", use_container_width=True, disabled=not api_ok):
             with st.spinner("L'IA analyse tes stats et crée le script parfait..."):
-                # Construit un prompt d'optimisation basé sur les stats
                 optimization_context = f"""
                 Contexte des performances actuelles:
                 - Rétention moyenne: {stats['avg_retention']}%
@@ -1082,4 +965,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
