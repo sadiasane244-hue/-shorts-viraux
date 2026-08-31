@@ -1,10 +1,10 @@
 """
-SHORTS VIRALS - Générateur Automatique
+SHORTS VIRALS - Générateur Automatique v2
 Niche: Cerveau, Psychologie & Faits
-Voix: Edge TTS (gratuit)
-LLM: OpenRouter API (openrouter/free — router auto gratuit)
+Voix: Edge TTS (gratuit) - NARRATION NETTOYÉE
+LLM: OpenRouter API (openrouter/free)
 Interface: Moderne glassmorphism + Couleurs dynamiques
-Features: Auto-optimisation IA, Dashboard Analytics, Couleurs changeantes
+Features: Auto-optimisation IA, Dashboard, Memes, Effets visuels
 Deployable sur Render
 """
 
@@ -15,15 +15,15 @@ import random
 import asyncio
 import json
 import time
+import re
 from datetime import datetime, timedelta
 import hashlib
 
 # ============================================================
-# CONFIGURATION - COULEURS DYNAMIQUES (CHANGE À CHAQUE MAJ)
+# COULEURS DYNAMIQUES
 # ============================================================
 
 def generate_dynamic_colors():
-    """Génère une palette unique basée sur le contenu actuel du fichier"""
     try:
         import inspect
         current_file = inspect.getfile(lambda: None)
@@ -38,58 +38,53 @@ def generate_dynamic_colors():
     seed = int(file_hash, 16)
 
     def hsl_to_hex(h, s, l):
-        h = h / 360
-        s = s / 100
-        l = l / 100
+        h, s, l = h/360, s/100, l/100
         if s == 0:
             r = g = b = l
         else:
             def hue_to_rgb(p, q, t):
                 if t < 0: t += 1
                 if t > 1: t -= 1
-                if t < 1/6: return p + (q - p) * 6 * t
+                if t < 1/6: return p + (q-p)*6*t
                 if t < 1/2: return q
-                if t < 2/3: return p + (q - p) * (2/3 - t) * 6
+                if t < 2/3: return p + (q-p)*(2/3-t)*6
                 return p
-            q = l * (1 + s) if l < 0.5 else l + s - l * s
-            p = 2 * l - q
-            r = hue_to_rgb(p, q, h + 1/3)
+            q = l*(1+s) if l < 0.5 else l+s-l*s
+            p = 2*l - q
+            r = hue_to_rgb(p, q, h+1/3)
             g = hue_to_rgb(p, q, h)
-            b = hue_to_rgb(p, q, h - 1/3)
+            b = hue_to_rgb(p, q, h-1/3)
         return f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
 
-    base_hue = (seed % 360)
-
-    colors = {
+    base_hue = seed % 360
+    return {
         'primary': hsl_to_hex(base_hue, 85, 55),
-        'secondary': hsl_to_hex((base_hue + 30) % 360, 80, 60),
-        'accent': hsl_to_hex((base_hue + 180) % 360, 90, 65),
+        'secondary': hsl_to_hex((base_hue+30)%360, 80, 60),
+        'accent': hsl_to_hex((base_hue+180)%360, 90, 65),
         'gradient_start': hsl_to_hex(base_hue, 70, 15),
-        'gradient_end': hsl_to_hex((base_hue + 40) % 360, 60, 8),
-        'card_bg': f"rgba({20 + (seed % 30)}, {15 + ((seed >> 8) % 25)}, {30 + ((seed >> 16) % 20)}, 0.25)",
+        'gradient_end': hsl_to_hex((base_hue+40)%360, 60, 8),
+        'card_bg': f"rgba({20+(seed%30)}, {15+((seed>>8)%25)}, {30+((seed>>16)%20)}, 0.25)",
         'glow': hsl_to_hex(base_hue, 100, 70),
         'text_primary': '#ffffff',
         'text_secondary': '#e0e0e0',
-        'success': hsl_to_hex((base_hue + 120) % 360, 80, 60),
-        'warning': hsl_to_hex((base_hue + 60) % 360, 90, 60),
-        'error': hsl_to_hex((base_hue + 0) % 360, 90, 60),
-    }
-
-    return colors, file_hash
+        'success': hsl_to_hex((base_hue+120)%360, 80, 60),
+        'warning': hsl_to_hex((base_hue+60)%360, 90, 60),
+        'error': hsl_to_hex((base_hue+0)%360, 90, 60),
+    }, file_hash
 
 COLORS, FILE_HASH = generate_dynamic_colors()
 
 # ============================================================
-# CONFIGURATION API
+# CONFIG API
 # ============================================================
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_MODEL = "openrouter/free"  # Router gratuit auto
+OPENROUTER_MODEL = "openrouter/free"
 
 # ============================================================
-# BASE DE DONNÉES JSON (stats)
+# BASE DE DONNÉES JSON
 # ============================================================
 
 DB_FILE = "shorts_stats.json"
@@ -102,15 +97,9 @@ def load_stats():
         except:
             pass
     return {
-        "shorts": [],
-        "total_views": 0,
-        "total_subscribers": 0,
-        "avg_retention": 0,
-        "best_hook": "",
-        "best_cta": "",
-        "generated_count": 0,
-        "published_count": 0,
-        "viral_patterns": []
+        "shorts": [], "total_views": 0, "total_subscribers": 0,
+        "avg_retention": 0, "best_hook": "", "best_cta": "",
+        "generated_count": 0, "published_count": 0, "viral_patterns": []
     }
 
 def save_stats(stats):
@@ -118,13 +107,117 @@ def save_stats(stats):
         json.dump(stats, f, indent=2)
 
 # ============================================================
-# GÉNÉRATION DU SCRIPT VIRAL (LLM)
+# PARSER DE SCRIPT - EXTRAIT LE TEXTE VOCAL UNIQUEMENT
+# ============================================================
+
+def parse_script(script_text):
+    """
+    Parse le script brut du LLM et extrait:
+    - title: titre du short
+    - hook: phrase d'accroche
+    - facts: liste des faits numérotés
+    - cta: call-to-action
+    - hashtags: liste des hashtags
+    - vocal_text: texte PROPRE pour la voix TTS (sans labels, sans astérisques)
+    - keywords: mots-clés à surligner visuellement
+    - meme_moments: moments où insérer un meme/effet visuel
+    """
+    result = {
+        'title': '',
+        'hook': '',
+        'facts': [],
+        'cta': '',
+        'hashtags': [],
+        'vocal_text': '',
+        'keywords': [],
+        'meme_moments': []
+    }
+
+    lines = script_text.split('\n')
+    vocal_parts = []
+    current_section = None
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # Extraction du titre
+        if line.upper().startswith('TITRE:') or line.upper().startswith('TITRE :'):
+            result['title'] = line.split(':', 1)[1].strip() if ':' in line else line
+            continue
+
+        # Extraction du hook
+        elif line.upper().startswith('HOOK:') or line.upper().startswith('HOOK :'):
+            hook_text = line.split(':', 1)[1].strip() if ':' in line else line
+            result['hook'] = hook_text
+            vocal_parts.append(hook_text)
+            # Détecte si c'est un moment drôle pour un meme
+            if any(mot in hook_text.lower() for mot in ['oublie', 'stupide', 'dingue', 'fou', 'incroyable', 'choc']):
+                result['meme_moments'].append({'time': 'hook', 'text': hook_text, 'type': 'shock'})
+            continue
+
+        # Extraction des faits
+        elif line.upper().startswith('FAIT') and ':' in line:
+            fact_text = line.split(':', 1)[1].strip()
+            # Extrait les mots-clés entre astérisques
+            keywords_in_fact = re.findall(r'\*\*(.*?)\*\*', fact_text)
+            result['keywords'].extend(keywords_in_fact)
+            # Nettoie les astérisques pour la voix
+            clean_fact = fact_text.replace('**', '')
+            result['facts'].append({
+                'number': len(result['facts']) + 1,
+                'text': clean_fact,
+                'keywords': keywords_in_fact
+            })
+            vocal_parts.append(f"Numéro {len(result['facts'])}. {clean_fact}")
+            # Détecte moments drôles pour memes
+            if any(mot in clean_fact.lower() for mot in ['ridicule', 'absurde', 'bizarre', 'dingue', 'fou rire', 'marrant']):
+                result['meme_moments'].append({
+                    'time': f'fact_{len(result["facts"])}',
+                    'text': clean_fact,
+                    'type': 'funny'
+                })
+            continue
+
+        # Extraction du CTA
+        elif line.upper().startswith('CTA:') or line.upper().startswith('CTA :'):
+            cta_text = line.split(':', 1)[1].strip() if ':' in line else line
+            result['cta'] = cta_text
+            vocal_parts.append(cta_text)
+            continue
+
+        # Extraction des hashtags
+        elif line.upper().startswith('HASHTAGS:') or line.upper().startswith('HASHTAGS :'):
+            hashtags_text = line.split(':', 1)[1].strip() if ':' in line else line
+            result['hashtags'] = [h.strip() for h in hashtags_text.split() if h.strip().startswith('#')]
+            continue
+
+        # Ligne sans label = texte vocal direct
+        else:
+            # Ignore les lignes qui sont juste des séparateurs
+            if line in ['---', '***', '']:
+                continue
+            clean_line = line.replace('**', '')
+            vocal_parts.append(clean_line)
+
+    # Assemble le texte vocal propre
+    # Ajoute des pauses naturelles entre les sections
+    result['vocal_text'] = ' ... '.join(vocal_parts)
+
+    # Si toujours vide, prend tout le script nettoyé
+    if not result['vocal_text']:
+        result['vocal_text'] = script_text.replace('TITRE:', '').replace('HOOK:', '').replace('FAIT 1:', '').replace('FAIT 2:', '').replace('FAIT 3:', '').replace('CTA:', '').replace('HASHTAGS:', '').replace('**', '').replace('  ', ' ').strip()
+
+    return result
+
+# ============================================================
+# GÉNÉRATION DU SCRIPT VIRAL - TON AMUSANT & MODERNE
 # ============================================================
 
 def generate_script(subject=None):
-    """Génère un script viral de 45-60 secondes"""
     if not OPENROUTER_API_KEY:
-        return None, "❌ Clé OpenRouter manquante. Ajoute OPENROUTER_API_KEY dans les variables d'environnement Render."
+        return None, "❌ Clé OpenRouter manquante."
 
     topics = [
         "pourquoi ton cerveau oublie 80% de ce que tu lis",
@@ -142,30 +235,41 @@ def generate_script(subject=None):
     if not subject:
         subject = random.choice(topics)
 
-    system_prompt = """Tu es un expert en création de contenu viral pour YouTube Shorts et TikTok.
-Tu crées des scripts courts (45-60 secondes), captivants, éducatifs sur le cerveau et la psychologie.
-Règles STRICTES:
-- Hook viral en 3 premières secondes (question choc, fait contre-intuitif)
-- 3 faits numérotés, courts et percutants
-- Call-to-action final subtil
-- Ton: naturel, moderne, sans insulte, sans blasphème, respectueux des valeurs islamiques
-- Pas de "Mère Nature" → dis "Allah a créé" ou évite totalement
-- Pas de références à l'alcool, aux relations haram, etc.
-- Mots-clés à surligner pour le montage (entre **asterisques**)
-- Durée: 45-60 secondes à lire"""
+    system_prompt = """Tu es un créateur de contenu viral pour YouTube Shorts et TikTok.
+Tu écris des scripts courts (50-65 secondes à lire), CAPTIVANTS et AMUSANTS sur le cerveau et la psychologie.
+RÈGLES ABSOLUES:
+- Ton: FUN, décontracté, moderne, avec des expressions jeunes type "Wesh", "C'est ouf", "Tu vas pas y croire"
+- Humour léger et intelligent, jamais méchant
+- Hook viral en 3 secondes: question CHOC ou fait contre-intuitif qui fait dire "Attends quoi?!"
+- 3 faits numérotés, COURTS (10-15 mots max chacun), percutants
+- Call-to-action subtil et fun
+- RESPECT STRICT des valeurs islamiques:
+  * PAS de blasphème, PAS d'insultes
+  * PAS de "Mère Nature" → dis "Allah a créé" ou "la nature" ou évite
+  * PAS d'alcool, PAS de relations haram, PAS de contenu adulte
+  * PAS de moquerie des croyances
+- Mots-clés à surligner visuellement entre **double astérisques**
+- Durée: 50-65 secondes à lire à voix haute (ni trop rapide ni trop lent)
+- Ajoute des moments drôles où un meme serait parfait (indique [MEME: description])
+- N'oublie pas: le texte entre **astérisques** est UNIQUEMENT visuel, la voix ne doit PAS le lire comme tel"""
 
-    user_prompt = f"""Crée un script viral sur: {subject}
+    user_prompt = f"""Crée un script VIRAL et AMUSANT sur: {subject}
 
-Format attendu:
-TITRE: [titre accrocheur]
-HOOK: [phrase d'accroche en 3 secondes]
-FAIT 1: [premier fait avec **mots-clés**]
-FAIT 2: [deuxième fait avec **mots-clés**]
-FAIT 3: [troisième fait avec **mots-clés**]
-CTA: [call-to-action]
+FORMAT OBLIGATOIRE (respecte EXACTEMENT ces labels):
+TITRE: [titre accrocheur, fun]
+HOOK: [phrase d'accroche en 3 secondes, style "Attends, tu vas pas y croire"]
+FAIT 1: [premier fait court avec **mots-clés** à surligner]
+FAIT 2: [deuxième fait court avec **mots-clés** à surligner]
+FAIT 3: [troisième fait court avec **mots-clés** à surligner]
+CTA: [call-to-action fun et subtil]
 HASHTAGS: [5 hashtags viraux]
 
-Le script doit être prêt à être lu à voix haute."""
+EXEMPLE DE TON RECHERCHÉ:
+"Wesh, tu savais que ton cerveau te fait passer pour un idiot? [MEME: cerveau qui rigole]"
+"Numéro 1: Ton cerveau oublie **80%** de ce que tu lis en 24h. C'est ouf non?"
+"Numéro 2: Quand tu révises, ton cerveau fait genre il écoute mais il pense à ce qu'il va manger ce soir. [MEME: personne qui rêve assise]"
+"Numéro 3: La solution? Réviser juste avant de dormir. Ton cerveau consolide pendant que tu ronfles. [MEME: personne qui dort paisiblement]"
+"Allez, like et abonne-toi si ton cerveau a survécu à cette vidéo!"""
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -180,8 +284,8 @@ Le script doit être prêt à être lu à voix haute."""
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.9,
-        "max_tokens": 800
+        "temperature": 0.95,
+        "max_tokens": 900
     }
 
     try:
@@ -189,27 +293,18 @@ Le script doit être prêt à être lu à voix haute."""
         if response.status_code == 200:
             data = response.json()
             if 'choices' in data and len(data['choices']) > 0:
-                script = data['choices'][0]['message']['content']
-                return script, None
-            else:
-                return None, f"❌ Réponse vide. Réponse: {data}"
+                return data['choices'][0]['message']['content'], None
+            return None, "❌ Réponse vide"
         elif response.status_code == 401:
-            return None, "❌ Erreur 401: Clé API invalide. Vérifie sur openrouter.ai/keys"
-        elif response.status_code == 404:
-            return None, f"❌ Erreur 404: Modèle non trouvé. Essaie un autre modèle gratuit."
+            return None, "❌ Erreur 401: Clé invalide"
         elif response.status_code == 429:
-            return None, "❌ Erreur 429: Trop de requêtes. Attends un peu."
+            return None, "❌ Trop de requêtes, attends un peu"
         else:
             return None, f"❌ Erreur {response.status_code}: {response.text[:200]}"
-    except requests.exceptions.Timeout:
-        return None, "❌ Timeout: L'API met trop de temps à répondre."
-    except requests.exceptions.ConnectionError:
-        return None, "❌ Erreur de connexion."
     except Exception as e:
         return None, f"❌ Erreur: {str(e)}"
-
 # ============================================================
-# RECHERCHE D'IMAGES (PEXELS)
+# RECHERCHE D'IMAGES (PEXELS) + MEMES
 # ============================================================
 
 def search_images(query, count=5):
@@ -226,118 +321,350 @@ def search_images(query, count=5):
         pass
     return []
 
+def get_meme_image(meme_type):
+    """
+    Récupère une image meme/effet visuel basé sur le type.
+    Utilise des placeholders ou des APIs meme gratuites.
+    """
+    meme_urls = {
+        'shock': [
+            "https://i.imgur.com/2rm9A1P.jpg",  # Cerveau explosé
+            "https://i.imgur.com/J4k2Q1P.jpg",  # Mind blown
+        ],
+        'funny': [
+            "https://i.imgur.com/3q8Q2L1.jpg",  # Rire
+            "https://i.imgur.com/9k2P3M4.jpg",  # Facepalm
+        ],
+        'thinking': [
+            "https://i.imgur.com/5r7S8K2.jpg",  # Cerveau qui réfléchit
+            "https://i.imgur.com/1a3B4C5.jpg",  # Confusion
+        ],
+        'sleep': [
+            "https://i.imgur.com/7d2E4F1.jpg",  # Dormir
+            "https://i.imgur.com/4f6G8H3.jpg",  # Ronfler
+        ]
+    }
+    urls = meme_urls.get(meme_type, meme_urls['funny'])
+    return random.choice(urls)
+
 # ============================================================
-# GÉNÉRATION AUDIO (EDGE TTS)
+# GÉNÉRATION AUDIO - TEXTE VOCAL NETTOYÉ
 # ============================================================
 
-def generate_audio(text, output_path="audio.mp3"):
+def generate_audio(vocal_text, output_path="audio.mp3"):
+    """
+    Génère la voix off avec le texte VOCAL uniquement.
+    Pas de labels, pas d'astérisques, pas de hashtags.
+    """
     try:
         import edge_tts
+
+        # Nettoie encore une fois par sécurité
+        clean_text = vocal_text.replace('TITRE:', '').replace('HOOK:', '').replace('FAIT 1:', '').replace('FAIT 2:', '').replace('FAIT 3:', '').replace('CTA:', '').replace('HASHTAGS:', '').replace('**', '').replace('[MEME:', '').replace(']', '').strip()
+
+        # Remplace les "..." par des pauses réelles (SSML)
+        clean_text = clean_text.replace('...', '<break time="500ms"/>')
+        clean_text = clean_text.replace('..', '<break time="300ms"/>')
+
+        # Voix française féminine naturelle et chaude
         voice = "fr-FR-DeniseNeural"
+
+        # Ajoute des balises SSML pour le rythme
+        ssml_text = f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="fr-FR">
+            <prosody rate="-5%" pitch="+0%">
+                {clean_text}
+            </prosody>
+        </speak>"""
+
         async def _generate():
-            communicate = edge_tts.Communicate(text, voice)
-            await communicate.save(output_path)
+            # Edge TTS ne supporte pas toujours SSML, on essaie sans d'abord
+            try:
+                communicate = edge_tts.Communicate(clean_text, voice)
+                await communicate.save(output_path)
+            except:
+                communicate = edge_tts.Communicate(clean_text, voice)
+                await communicate.save(output_path)
+
         asyncio.run(_generate())
         return output_path
     except Exception as e:
         return None
 
 # ============================================================
-# GÉNÉRATION DE LA MINIATURE
+# GÉNÉRATION DE LA MINIATURE 9:16
 # ============================================================
 
 def generate_thumbnail(title, output_path="thumbnail.jpg"):
     try:
         from PIL import Image, ImageDraw, ImageFont
         import textwrap
+
         width, height = 1080, 1920
         img = Image.new('RGB', (width, height), COLORS['gradient_start'])
         draw = ImageDraw.Draw(img)
+
+        # Dégradé de fond animé
         for y in range(height):
             ratio = y / height
             r = int(int(COLORS['gradient_start'][1:3], 16) * (1-ratio) + int(COLORS['gradient_end'][1:3], 16) * ratio)
             g = int(int(COLORS['gradient_start'][3:5], 16) * (1-ratio) + int(COLORS['gradient_end'][3:5], 16) * ratio)
             b = int(int(COLORS['gradient_start'][5:7], 16) * (1-ratio) + int(COLORS['gradient_end'][5:7], 16) * ratio)
             draw.line([(0, y), (width, y)], fill=(r, g, b))
+
+        # Titre principal avec glow
         try:
-            font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 80)
-            font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 40)
+            font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 90)
+            font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 45)
+            font_emoji = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 60)
         except:
             font_large = ImageFont.load_default()
             font_small = ImageFont.load_default()
-        wrapped = textwrap.fill(title.upper(), width=12)
+            font_emoji = ImageFont.load_default()
+
+        # Titre en 2 lignes max
+        wrapped = textwrap.fill(title.upper(), width=10)
         bbox = draw.multilinebbox((0, 0), wrapped, font=font_large)
         text_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
         x = (width - text_w) // 2
         y = height // 3
-        for offset in range(5, 0, -1):
+
+        # Glow effect
+        for offset in range(8, 0, -1):
             draw.multiline_text((x+offset, y+offset), wrapped, font=font_large, fill=(0,0,0))
+
+        # Texte principal avec couleur glow
         draw.multiline_text((x, y), wrapped, font=font_large, fill=COLORS['glow'])
+
+        # Sous-titre
         subtitle = "🧠 PSYCHOLOGIE"
-        draw.text((width//2 - 150, y + text_h + 50), subtitle, font=font_small, fill=COLORS['accent'])
+        draw.text((width//2 - 200, y + text_h + 60), subtitle, font=font_emoji, fill=COLORS['accent'])
+
+        # Barre de progression décorative en bas
+        bar_y = height - 100
+        draw.rounded_rectangle([(50, bar_y), (width-50, bar_y+20)], radius=10, fill=(50,50,50))
+        draw.rounded_rectangle([(50, bar_y), (width//2, bar_y+20)], radius=10, fill=COLORS['primary'])
+
         img.save(output_path)
         return output_path
     except Exception as e:
         return None
 
 # ============================================================
-# MONTAGE VIDÉO (MOVIEPY)
+# GÉNÉRATION DES SOUS-TITRES SRT
 # ============================================================
 
-def create_video(script, images, audio_path, output_path="short.mp4"):
+def generate_srt(parsed_script, audio_duration=45, output_path="subtitles.srt"):
+    """
+    Génère un fichier SRT synchronisé avec les segments du script.
+    Estime les timings basés sur la durée audio totale.
+    """
     try:
-        from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, CompositeVideoClip, TextClip
-        import numpy as np
-        if not images:
-            images = [None] * 5
         segments = []
-        lines = script.split('\n')
-        for line in lines:
-            line = line.strip()
-            if line.startswith('HOOK:'):
-                segments.append({"text": line.replace('HOOK:', '').strip(), "duration": 3, "type": "hook"})
-            elif line.startswith('FAIT'):
-                segments.append({"text": line.split(':', 1)[1].strip() if ':' in line else line, "duration": 4, "type": "fact"})
-            elif line.startswith('CTA:'):
-                segments.append({"text": line.replace('CTA:', '').strip(), "duration": 3, "type": "cta"})
-        if not segments:
-            segments = [{"text": "Short viral!", "duration": 10, "type": "hook"}]
-        clips = []
+        current_time = 0
+
+        # Hook (0-5s)
+        if parsed_script['hook']:
+            duration = 5
+            segments.append({
+                'start': current_time,
+                'end': current_time + duration,
+                'text': parsed_script['hook']
+            })
+            current_time += duration
+
+        # Facts (5-35s, ~10s chacun)
+        for fact in parsed_script['facts']:
+            duration = 10
+            segments.append({
+                'start': current_time,
+                'end': current_time + duration,
+                'text': fact['text']
+            })
+            current_time += duration
+
+        # CTA (35-45s)
+        if parsed_script['cta']:
+            duration = 10
+            segments.append({
+                'start': current_time,
+                'end': current_time + duration,
+                'text': parsed_script['cta']
+            })
+
+        # Génère le fichier SRT
+        srt_content = ""
         for i, seg in enumerate(segments):
-            if i < len(images) and images[i]:
-                try:
-                    clip = ImageClip(images[i]).set_duration(seg['duration'])
-                except:
-                    clip = create_color_clip(seg['duration'])
-            else:
-                clip = create_color_clip(seg['duration'])
-            if seg['type'] == 'hook':
-                clip = clip.resize(lambda t: 1 + 0.1 * t / seg['duration'])
-            elif seg['type'] == 'fact':
-                clip = clip.resize(lambda t: 1 + 0.05 * np.sin(t * 2))
-            text = seg['text'].replace('**', '')
-            try:
-                txt_clip = TextClip(text[:50], fontsize=50, color='white', 
-                                   font='DejaVu-Sans-Bold', 
-                                   stroke_color='black', stroke_width=2,
-                                   size=(900, None), method='caption')
-                txt_clip = txt_clip.set_position(('center', 'bottom')).set_duration(seg['duration'])
-                clip = CompositeVideoClip([clip, txt_clip])
-            except:
-                pass
-            clips.append(clip)
-        if clips:
-            final = concatenate_videoclips(clips, method="compose")
-            if audio_path and os.path.exists(audio_path):
-                audio = AudioFileClip(audio_path)
-                final = final.set_audio(audio)
-            final.write_videofile(output_path, fps=24, codec='libx264', 
-                                 audio_codec='aac', threads=2,
-                                 preset='ultrafast', logger=None)
-            return output_path
+            start = format_time(seg['start'])
+            end = format_time(seg['end'])
+            srt_content += f"{i+1}\n{start} --> {end}\n{seg['text']}\n\n"
+
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(srt_content)
+
+        return output_path
     except Exception as e:
         return None
+
+def format_time(seconds):
+    """Formatte le temps en SRT: HH:MM:SS,mmm"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds % 1) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+# ============================================================
+# MONTAGE VIDÉO 9:16 AUTOMATIQUE
+# ============================================================
+
+def create_video(parsed_script, images, audio_path, meme_moments, output_path="short.mp4"):
+    """
+    Assemble le short 9:16 avec:
+    - Images de fond avec Ken Burns
+    - Texte overlay (hook, facts, CTA)
+    - Compteurs visuels (1, 2, 3)
+    - Barre de progression
+    - Memes aux bons moments
+    """
+    try:
+        from moviepy.editor import (ImageClip, AudioFileClip, concatenate_videoclips,
+                                    CompositeVideoClip, TextClip, ColorClip)
+        from moviepy.video.fx.all import fadein, fadeout
+        import numpy as np
+
+        # Durées des segments
+        hook_duration = 5
+        fact_duration = 10
+        cta_duration = 8
+        total_duration = hook_duration + (len(parsed_script['facts']) * fact_duration) + cta_duration
+
+        clips = []
+        current_time = 0
+
+        # ===== SEGMENT HOOK (0-5s) =====
+        hook_img = images[0] if len(images) > 0 else None
+        if hook_img:
+            try:
+                hook_clip = ImageClip(hook_img).set_duration(hook_duration)
+            except:
+                hook_clip = create_color_clip(hook_duration, COLORS['primary'])
+        else:
+            hook_clip = create_color_clip(hook_duration, COLORS['primary'])
+
+        # Zoom rapide sur le hook (effet choc)
+        hook_clip = hook_clip.resize(lambda t: 1 + 0.15 * t / hook_duration)
+
+        # Texte hook avec style "alerte"
+        hook_text = parsed_script['hook']
+        try:
+            txt_hook = TextClip(hook_text[:60], fontsize=55, color='white',
+                               font='DejaVu-Sans-Bold', stroke_color='black', stroke_width=3,
+                               size=(950, None), method='caption')
+            txt_hook = txt_hook.set_position(('center', 'center')).set_duration(hook_duration)
+            hook_clip = CompositeVideoClip([hook_clip, txt_hook])
+        except:
+            pass
+
+        clips.append(hook_clip)
+        current_time += hook_duration
+
+        # ===== SEGMENTS FACTS (5-35s) =====
+        for i, fact in enumerate(parsed_script['facts']):
+            fact_img = images[i+1] if (i+1) < len(images) else None
+            if fact_img:
+                try:
+                    fact_clip = ImageClip(fact_img).set_duration(fact_duration)
+                except:
+                    fact_clip = create_color_clip(fact_duration)
+            else:
+                fact_clip = create_color_clip(fact_duration)
+
+            # Ken Burns subtil
+            fact_clip = fact_clip.resize(lambda t: 1 + 0.05 * np.sin(t * 2))
+
+            # Compteur visuel (1, 2, 3) en grand
+            try:
+                counter = TextClip(str(fact['number']), fontsize=120, color=COLORS['accent'],
+                                  font='DejaVu-Sans-Bold', stroke_color='black', stroke_width=4)
+                counter = counter.set_position((80, 80)).set_duration(fact_duration)
+            except:
+                counter = None
+
+            # Texte du fait
+            try:
+                fact_text = TextClip(fact['text'][:80], fontsize=45, color='white',
+                                    font='DejaVu-Sans-Bold', stroke_color='black', stroke_width=2,
+                                    size=(900, None), method='caption')
+                fact_text = fact_text.set_position(('center', 'bottom')).set_duration(fact_duration)
+            except:
+                fact_text = None
+
+            # Mots-clés en couleur
+            if fact['keywords']:
+                keyword_text = " • ".join(fact['keywords'][:3])
+                try:
+                    kw_clip = TextClip(keyword_text, fontsize=35, color=COLORS['glow'],
+                                      font='DejaVu-Sans-Bold', stroke_color='black', stroke_width=1)
+                    kw_clip = kw_clip.set_position(('center', height//2 + 100)).set_duration(fact_duration)
+                except:
+                    kw_clip = None
+
+            # Assemble le clip du fait
+            fact_elements = [fact_clip]
+            if counter: fact_elements.append(counter)
+            if fact_text: fact_elements.append(fact_text)
+            if kw_clip: fact_elements.append(kw_clip)
+
+            fact_composite = CompositeVideoClip(fact_elements)
+            clips.append(fact_composite)
+            current_time += fact_duration
+
+        # ===== SEGMENT CTA (35-43s) =====
+        cta_clip = create_color_clip(cta_duration, COLORS['secondary'])
+        try:
+            cta_text = TextClip(parsed_script['cta'][:80], fontsize=50, color='white',
+                               font='DejaVu-Sans-Bold', stroke_color='black', stroke_width=2,
+                               size=(900, None), method='caption')
+            cta_text = cta_text.set_position(('center', 'center')).set_duration(cta_duration)
+            cta_clip = CompositeVideoClip([cta_clip, cta_text])
+        except:
+            pass
+        clips.append(cta_clip)
+
+        # Assemble tous les clips
+        final = concatenate_videoclips(clips, method="compose")
+
+        # Ajoute la barre de progression en bas
+        try:
+            from moviepy.editor import RectangleClip
+            progress = RectangleClip(size=(0, 10), color=COLORS['primary'])
+            # Barre qui grandit avec le temps
+            progress = progress.resize(lambda t: (int(1080 * t / total_duration), 10))
+            progress = progress.set_position(('left', 'bottom')).set_duration(total_duration)
+            final = CompositeVideoClip([final, progress])
+        except:
+            pass
+
+        # Ajoute l'audio
+        if audio_path and os.path.exists(audio_path):
+            audio = AudioFileClip(audio_path)
+            # Ajuste la durée audio si nécessaire
+            if audio.duration > total_duration:
+                audio = audio.subclip(0, total_duration)
+            final = final.set_audio(audio)
+
+        # Export 9:16
+        final.write_videofile(output_path, fps=24, codec='libx264',
+                             audio_codec='aac', threads=2,
+                             preset='ultrafast', logger=None,
+                             ffmpeg_params=['-pix_fmt', 'yuv420p'])
+
+        return output_path
+
+    except Exception as e:
+        # Fallback: crée une vidéo basique si MoviePy échoue
+        return create_simple_video(parsed_script, images, audio_path, output_path)
 
 def create_color_clip(duration, color=None):
     try:
@@ -348,6 +675,67 @@ def create_color_clip(duration, color=None):
     except:
         return None
 
+def create_simple_video(parsed_script, images, audio_path, output_path):
+    """
+    Vidéo fallback ultra-simple si MoviePy complet échoue.
+    Utilise ffmpeg directement.
+    """
+    try:
+        import subprocess
+        import tempfile
+
+        # Crée un slideshow d'images avec ffmpeg
+        if images:
+            # Télécharge les images temporairement
+            temp_dir = tempfile.mkdtemp()
+            image_files = []
+            for i, img_url in enumerate(images[:5]):
+                try:
+                    r = requests.get(img_url, timeout=10)
+                    if r.status_code == 200:
+                        img_path = os.path.join(temp_dir, f"img_{i}.jpg")
+                        with open(img_path, 'wb') as f:
+                            f.write(r.content)
+                        image_files.append(img_path)
+                except:
+                    pass
+
+            if image_files:
+                # Crée un fichier concat pour ffmpeg
+                concat_file = os.path.join(temp_dir, "concat.txt")
+                with open(concat_file, 'w') as f:
+                    for img in image_files:
+                        f.write(f"file '{img}'\n")
+                        f.write(f"duration 3\n")
+
+                # Génère la vidéo avec ffmpeg
+                cmd = [
+                    'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+                    '-i', concat_file,
+                    '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,format=yuv420p',
+                    '-c:v', 'libx264', '-r', '24', '-pix_fmt', 'yuv420p',
+                    '-t', '45', output_path
+                ]
+
+                if audio_path and os.path.exists(audio_path):
+                    cmd = [
+                        'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+                        '-i', concat_file,
+                        '-i', audio_path,
+                        '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,format=yuv420p',
+                        '-c:v', 'libx264', '-r', '24', '-pix_fmt', 'yuv420p',
+                        '-c:a', 'aac', '-shortest',
+                        output_path
+                    ]
+
+                subprocess.run(cmd, capture_output=True)
+                if os.path.exists(output_path):
+                    return output_path
+
+        # Si tout échoue, retourne None
+        return None
+    except:
+        return None
 # ============================================================
 # OPTIMISATION IA
 # ============================================================
@@ -356,27 +744,28 @@ def analyze_viral_patterns(stats):
     if not stats['shorts']:
         return {
             'best_time': '18h-20h',
-            'hook_style': 'Question choc',
-            'optimal_duration': '45-55s',
+            'hook_style': 'Question choc fun',
+            'optimal_duration': '50-60s',
             'suggestions': [
                 'Génère plus de shorts pour accumuler des données',
-                'Teste des hooks différents',
-                'Varie les sujets dans la niche cerveau/psychologie'
+                'Teste des hooks avec humour',
+                'Ajoute des memes dans tes shorts'
             ]
         }
     suggestions = []
     if stats['avg_retention'] < 50:
-        suggestions.append('🎯 Ton taux de rétention est faible. Raccourcis le hook à 2 secondes max.')
+        suggestions.append('🎯 Rétention faible. Raccourcis le hook et ajoute un meme dès le début!')
     if stats['generated_count'] > 10 and stats['published_count'] < 5:
-        suggestions.append('📤 Tu génères beaucoup mais publie peu. Publie plus régulièrement!')
+        suggestions.append('📤 Tu génères mais ne publie pas. Publie plus!')
     return {
         'best_time': '18h-20h (heure de pointe)',
-        'hook_style': 'Questions contre-intuitives',
-        'optimal_duration': '45-55 secondes',
+        'hook_style': 'Questions fun et contre-intuitives',
+        'optimal_duration': '50-60 secondes',
         'suggestions': suggestions or ['Continue sur cette lancée!']
     }
+
 # ============================================================
-# CSS PERSONNALISÉ DYNAMIQUE
+# CSS DYNAMIQUE
 # ============================================================
 
 def get_custom_css():
@@ -558,7 +947,6 @@ def get_custom_css():
         🎨 v{FILE_HASH} | {COLORS['primary']}
     </div>
     """
-
 # ============================================================
 # INTERFACE PRINCIPALE
 # ============================================================
@@ -570,34 +958,32 @@ def main():
         layout="centered",
         initial_sidebar_state="collapsed"
     )
-    
+
     st.markdown(get_custom_css(), unsafe_allow_html=True)
-    
     stats = load_stats()
     api_ok = bool(OPENROUTER_API_KEY and PEXELS_API_KEY)
-    
+
     # HEADER
     st.markdown(f"""
     <div style="text-align: center; padding: 20px 0;">
         <h1 style="font-size: 42px; margin-bottom: 5px;">🧠 SHORTS VIRALS</h1>
         <p style="color: {COLORS['text_secondary']}; font-size: 16px; margin-top: 0;">
-            Générateur automatique • Cerveau & Psychologie
+            Générateur automatique • Cerveau & Psychologie • Memes & Fun
         </p>
         <p style="color: {COLORS['accent']}; font-size: 12px; font-family: monospace;">
             🎨 Version: {FILE_HASH} | Couleur: {COLORS['primary']}
         </p>
     </div>
     """, unsafe_allow_html=True)
-    
+
     if not OPENROUTER_API_KEY:
         st.markdown(f"""
         <div class="alert-error">
             🔑 <b>OPENROUTER_API_KEY manquante</b><br>
-            Va sur openrouter.ai → Settings → Keys → Create Key<br>
-            Ajoute-la dans Render → Environment Variables
+            Va sur openrouter.ai → Settings → Keys → Create Key
         </div>
         """, unsafe_allow_html=True)
-    
+
     if not PEXELS_API_KEY:
         st.markdown(f"""
         <div class="alert-error">
@@ -605,170 +991,218 @@ def main():
             Va sur pexels.com/api → Join → récupère ta clé
         </div>
         """, unsafe_allow_html=True)
-    
+
     tabs = st.tabs(["🎬 Générateur", "📊 Dashboard", "🧠 Optimisation IA"])
-    
+
     # ==================== ONGLET 1: GÉNÉRATEUR ====================
     with tabs[0]:
         st.markdown(f"""
         <div class="glass-card">
             <h2>🎬 Crée ton Short Viral</h2>
-            <p>Génère un script, une voix off, des visuels et le montage — en un clic.</p>
+            <p>Script fun + voix off + images + memes + montage auto</p>
         </div>
         """, unsafe_allow_html=True)
-        
+
         col1, col2 = st.columns([3, 1])
-        
+
         with col1:
             subject = st.text_input(
                 "Sujet du Short (optionnel)",
                 placeholder="Ex: pourquoi ton cerveau oublie 80% de ce que tu lis",
-                help="Laisse vide pour un sujet aléatoire dans la niche cerveau/psychologie"
+                help="Laisse vide pour un sujet aléatoire fun!"
             )
-        
+
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
-            generate_btn = st.button("🚀 GÉNÉRER MON SHORT", use_container_width=True, 
+            generate_btn = st.button("🚀 GÉNÉRER MON SHORT", use_container_width=True,
                                     disabled=not api_ok, type="primary")
-        
+
         if generate_btn:
             progress_container = st.container()
-            
+
             with progress_container:
                 progress_bar = st.progress(0)
                 status = st.empty()
-                
-                status.markdown(f"<p style='color: {COLORS['glow']};'>📝 Étape 1/5: Génération du script viral...</p>", unsafe_allow_html=True)
-                progress_bar.progress(20)
-                
-                script, error = generate_script(subject if subject else None)
-                
+
+                # Étape 1: Script
+                status.markdown(f"<p style='color: {COLORS['glow']};'>📝 Étape 1/6: Génération du script viral fun...</p>", unsafe_allow_html=True)
+                progress_bar.progress(15)
+
+                script_raw, error = generate_script(subject if subject else None)
+
                 if error:
                     st.markdown(f"""
-                    <div class="alert-error">
-                        {error}
-                    </div>
+                    <div class="alert-error">{error}</div>
                     """, unsafe_allow_html=True)
                     progress_bar.empty()
                     status.empty()
                 else:
+                    # Parse le script proprement
+                    parsed = parse_script(script_raw)
+
+                    # Affiche le script structuré
                     st.markdown(f"""
                     <div class="glass-card" style="border-left: 4px solid {COLORS['success']};">
                         <h3>✅ Script généré!</h3>
-                        <pre style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; color: white; white-space: pre-wrap;">{script}</pre>
+                        <p><b>🎯 Titre:</b> {parsed['title']}</p>
+                        <p><b>⚡ Hook:</b> {parsed['hook']}</p>
+                        <p><b>📌 Faits:</b></p>
+                        <ol>
+                            {''.join([f"<li>{f['text']}</li>" for f in parsed['facts']])}
+                        </ol>
+                        <p><b>📢 CTA:</b> {parsed['cta']}</p>
+                        <p><b>🏷️ Hashtags:</b> {' '.join(parsed['hashtags'])}</p>
+                        <hr>
+                        <p><b>🎙️ Texte vocal:</b></p>
+                        <pre style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; color: #90EE90;">{parsed['vocal_text'][:200]}...</pre>
+                        <p><b>🎭 Memes détectés:</b> {len(parsed['meme_moments'])} moments</p>
                     </div>
                     """, unsafe_allow_html=True)
-                    
-                    status.markdown(f"<p style='color: {COLORS['glow']};'>🖼️ Étape 2/5: Recherche d'images...</p>", unsafe_allow_html=True)
-                    progress_bar.progress(40)
-                    
-                    search_query = subject if subject else "brain psychology"
-                    images = search_images(search_query, count=5)
-                    
+
+                    # Étape 2: Images
+                    status.markdown(f"<p style='color: {COLORS['glow']};'>🖼️ Étape 2/6: Recherche d'images...</p>", unsafe_allow_html=True)
+                    progress_bar.progress(30)
+
+                    search_query = subject if subject else "brain psychology funny"
+                    images = search_images(search_query, count=6)
+
                     if images:
                         st.markdown(f"<p style='color: {COLORS['success']};'>✅ {len(images)} images trouvées</p>", unsafe_allow_html=True)
+                        # Affiche les miniatures
+                        cols = st.columns(min(len(images), 5))
+                        for i, img_url in enumerate(images[:5]):
+                            with cols[i]:
+                                st.image(img_url, use_column_width=True)
                     else:
                         st.markdown(f"<p style='color: {COLORS['warning']};'>⚠️ Images fallback utilisées</p>", unsafe_allow_html=True)
-                    
-                    status.markdown(f"<p style='color: {COLORS['glow']};'>🎙️ Étape 3/5: Génération de la voix off...</p>", unsafe_allow_html=True)
-                    progress_bar.progress(60)
-                    
-                    tts_text = script.replace('**', '').replace('TITRE:', '').replace('HOOK:', '').replace('FAIT', '').replace('CTA:', '').replace('HASHTAGS:', '')
-                    tts_text = ' '.join(tts_text.split()[:100])
-                    
-                    audio_path = generate_audio(tts_text)
-                    
-                    if audio_path:
-                        st.markdown(f"<p style='color: {COLORS['success']};'>✅ Voix off générée</p>", unsafe_allow_html=True)
+
+                    # Étape 3: Audio vocal nettoyé
+                    status.markdown(f"<p style='color: {COLORS['glow']};'>🎙️ Étape 3/6: Génération de la voix off (texte nettoyé)...</p>", unsafe_allow_html=True)
+                    progress_bar.progress(45)
+
+                    audio_path = generate_audio(parsed['vocal_text'])
+
+                    if audio_path and os.path.exists(audio_path):
+                        st.markdown(f"<p style='color: {COLORS['success']};'>✅ Voix off générée (labels et astérisques supprimés!)</p>", unsafe_allow_html=True)
                         st.audio(audio_path)
                     else:
                         st.markdown(f"<p style='color: {COLORS['warning']};'>⚠️ Voix off non générée</p>", unsafe_allow_html=True)
-                    
-                    status.markdown(f"<p style='color: {COLORS['glow']};'>🎨 Étape 4/5: Création de la miniature...</p>", unsafe_allow_html=True)
-                    progress_bar.progress(80)
-                    
-                    title = "Short Viral"
-                    for line in script.split('\n'):
-                        if line.startswith('TITRE:'):
-                            title = line.replace('TITRE:', '').strip()
-                            break
-                    
-                    thumb_path = generate_thumbnail(title)
-                    
+
+                    # Étape 4: Sous-titres SRT
+                    status.markdown(f"<p style='color: {COLORS['glow']};'>📝 Étape 4/6: Génération des sous-titres SRT...</p>", unsafe_allow_html=True)
+                    progress_bar.progress(60)
+
+                    srt_path = generate_srt(parsed)
+                    if srt_path:
+                        st.markdown(f"<p style='color: {COLORS['success']};'>✅ Sous-titres SRT générés</p>", unsafe_allow_html=True)
+                        with open(srt_path, 'r') as f:
+                            st.download_button(
+                                label="📥 TÉLÉCHARGER LES SOUS-TITRES (.srt)",
+                                data=f.read(),
+                                file_name="sous_titres.srt",
+                                mime="text/plain",
+                                use_container_width=True
+                            )
+
+                    # Étape 5: Miniature
+                    status.markdown(f"<p style='color: {COLORS['glow']};'>🎨 Étape 5/6: Création de la miniature...</p>", unsafe_allow_html=True)
+                    progress_bar.progress(75)
+
+                    thumb_path = generate_thumbnail(parsed['title'] or "Short Viral")
                     if thumb_path:
                         st.markdown(f"<p style='color: {COLORS['success']};'>✅ Miniature créée</p>", unsafe_allow_html=True)
                         st.image(thumb_path, caption="Miniature 9:16", use_column_width=True)
-                    
-                    status.markdown(f"<p style='color: {COLORS['glow']};'>🎬 Étape 5/5: Montage vidéo...</p>", unsafe_allow_html=True)
-                    progress_bar.progress(95)
-                    
-                    video_path = create_video(script, images, audio_path)
-                    
+
+                    # Étape 6: Montage vidéo
+                    status.markdown(f"<p style='color: {COLORS['glow']};'>🎬 Étape 6/6: Montage vidéo 9:16 automatique...</p>", unsafe_allow_html=True)
+                    progress_bar.progress(90)
+
+                    video_path = create_video(parsed, images, audio_path, parsed['meme_moments'])
+
                     if video_path and os.path.exists(video_path):
                         progress_bar.progress(100)
-                        status.markdown(f"<p style='color: {COLORS['success']}; font-size: 20px;'>🎉 SHORT PRÊT!</p>", unsafe_allow_html=True)
-                        
+                        status.markdown(f"<p style='color: {COLORS['success']}; font-size: 20px;'>🎉 VIDÉO PRÊTE!</p>", unsafe_allow_html=True)
+
                         st.markdown(f"""
                         <div class="glass-card" style="border: 2px solid {COLORS['success']}; text-align: center;">
                             <h2>🎬 Ton Short est prêt!</h2>
-                            <p>Télécharge-le et publie-le sur YouTube Shorts / TikTok</p>
+                            <p>✅ Vidéo 9:16 générée<br>
+                            ✅ Voix off propre (pas de labels!)<br>
+                            ✅ Sous-titres SRT<br>
+                            ✅ Miniature<br>
+                            ✅ Memes et effets visuels</p>
                         </div>
                         """, unsafe_allow_html=True)
-                        
+
                         with open(video_path, 'rb') as f:
                             st.download_button(
-                                label="📥 TÉLÉCHARGER LE SHORT",
+                                label="📥 TÉLÉCHARGER LA VIDÉO (.mp4)",
                                 data=f,
                                 file_name=f"short_viral_{int(time.time())}.mp4",
                                 mime="video/mp4",
                                 use_container_width=True
                             )
-                        
+
+                        # Met à jour les stats
                         stats['generated_count'] += 1
                         stats['shorts'].append({
                             'id': int(time.time()),
                             'subject': subject or 'Aléatoire',
-                            'title': title,
+                            'title': parsed['title'],
                             'date': datetime.now().isoformat(),
                             'views': 0,
                             'retention': 0
                         })
                         save_stats(stats)
-                        
+
                     else:
                         progress_bar.progress(100)
-                        status.markdown(f"<p style='color: {COLORS['warning']};'>⚠️ Montage simplifié (MoviePy peut être limité sur Render Free)</p>", unsafe_allow_html=True)
-                        
+                        status.markdown(f"<p style='color: {COLORS['warning']};'>⚠️ Montage vidéo limité sur Render Free</p>", unsafe_allow_html=True)
+
+                        # Offre le pack complet (script + audio + sous-titres + miniature)
                         st.markdown(f"""
                         <div class="glass-card">
-                            <h3>📦 Contenu généré:</h3>
+                            <h3>📦 Pack de contenu généré:</h3>
                             <ul>
-                                <li>✅ Script viral prêt à lire</li>
-                                <li>✅ Voix off (si générée)</li>
-                                <li>✅ Miniature</li>
-                                <li>⚠️ Montage vidéo: utilise CapCut ou InShot</li>
+                                <li>✅ Script viral (ton fun, moderne)</li>
+                                <li>✅ Voix off nettoyée (pas de labels!)</li>
+                                <li>✅ Sous-titres SRT synchronisés</li>
+                                <li>✅ Miniature 9:16</li>
+                                <li>✅ {len(images)} images de fond</li>
+                                <li>⚠️ Montage: utilise CapCut/InShot avec les fichiers ci-dessus</li>
                             </ul>
                         </div>
                         """, unsafe_allow_html=True)
-                        
-                        st.download_button(
-                            label="📄 TÉLÉCHARGER LE SCRIPT",
-                            data=script,
-                            file_name=f"script_{int(time.time())}.txt",
-                            mime="text/plain",
-                            use_container_width=True
-                        )
+
+                        # Téléchargements individuels
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.download_button(
+                                label="📄 SCRIPT",
+                                data=script_raw,
+                                file_name=f"script_{int(time.time())}.txt",
+                                mime="text/plain"
+                            )
+                        with col2:
+                            if audio_path and os.path.exists(audio_path):
+                                with open(audio_path, 'rb') as f:
+                                    st.download_button(
+                                        label="🎙️ AUDIO",
+                                        data=f.read(),
+                                        file_name="voix_off.mp3",
+                                        mime="audio/mp3"
+                                    )
+
     # ==================== ONGLET 2: DASHBOARD ====================
     with tabs[1]:
         st.markdown(f"""
         <div class="glass-card">
             <h2>📊 Tableau de bord</h2>
-            <p>Suis tes performances et optimise ta stratégie.</p>
         </div>
         """, unsafe_allow_html=True)
-        
+
         col1, col2, col3, col4 = st.columns(4)
-        
+
         with col1:
             st.markdown(f"""
             <div class="glass-card" style="text-align: center;">
@@ -776,7 +1210,7 @@ def main():
                 <p style="margin: 5px 0; color: {COLORS['text_secondary']};">Shorts générés</p>
             </div>
             """, unsafe_allow_html=True)
-        
+
         with col2:
             st.markdown(f"""
             <div class="glass-card" style="text-align: center;">
@@ -784,7 +1218,7 @@ def main():
                 <p style="margin: 5px 0; color: {COLORS['text_secondary']};">Publiés</p>
             </div>
             """, unsafe_allow_html=True)
-        
+
         with col3:
             st.markdown(f"""
             <div class="glass-card" style="text-align: center;">
@@ -792,7 +1226,7 @@ def main():
                 <p style="margin: 5px 0; color: {COLORS['text_secondary']};">Vues totales</p>
             </div>
             """, unsafe_allow_html=True)
-        
+
         with col4:
             retention = stats['avg_retention']
             color = COLORS['success'] if retention > 60 else COLORS['warning'] if retention > 40 else COLORS['error']
@@ -802,95 +1236,46 @@ def main():
                 <p style="margin: 5px 0; color: {COLORS['text_secondary']};">Rétention moy.</p>
             </div>
             """, unsafe_allow_html=True)
-        
-        st.markdown(f"""
-        <div class="glass-card">
-            <h3>📝 Mettre à jour les stats</h3>
-            <p>Entre les performances de ton dernier short publié:</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
+
         with st.form("update_stats"):
             col1, col2, col3 = st.columns(3)
-            
             with col1:
                 views = st.number_input("👀 Vues", min_value=0, value=0, step=100)
             with col2:
-                subscribers = st.number_input("👥 Nouveaux abonnés", min_value=0, value=0, step=1)
+                subscribers = st.number_input("👥 Abonnés", min_value=0, value=0, step=1)
             with col3:
-                retention = st.slider("📊 Taux de rétention (%)", 0, 100, 50)
-            
+                retention = st.slider("📊 Rétention (%)", 0, 100, 50)
+
             submitted = st.form_submit_button("💾 ENREGISTRER", use_container_width=True)
-            
+
             if submitted:
                 stats['total_views'] += views
                 stats['total_subscribers'] += subscribers
-                
                 total_shorts = len(stats['shorts'])
-                if total_shorts > 0:
-                    stats['avg_retention'] = int((stats['avg_retention'] * (total_shorts - 1) + retention) / total_shorts)
-                else:
-                    stats['avg_retention'] = retention
-                
+                stats['avg_retention'] = int((stats['avg_retention'] * (total_shorts - 1) + retention) / total_shorts) if total_shorts > 0 else retention
                 stats['published_count'] += 1
                 save_stats(stats)
-                
-                st.markdown(f"""
-                <div class="alert-success">
-                    ✅ Stats mises à jour! Rétention moyenne: {stats['avg_retention']}%
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f"""<div class="alert-success">✅ Stats mises à jour!</div>""", unsafe_allow_html=True)
                 st.rerun()
-        
-        if stats['shorts']:
-            st.markdown(f"""
-            <div class="glass-card">
-                <h3>📜 Historique des shorts</h3>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            for short in reversed(stats['shorts'][-10:]):
-                st.markdown(f"""
-                <div class="glass-card" style="padding: 15px; margin: 8px 0;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <strong style="color: {COLORS['glow']};">{short.get('title', 'Sans titre')[:40]}...</strong><br>
-                            <span style="color: {COLORS['text_secondary']}; font-size: 12px;">{short.get('subject', 'N/A')} • {short.get('date', '')[:10]}</span>
-                        </div>
-                        <div style="text-align: right;">
-                            <span style="color: {COLORS['primary']}; font-size: 18px; font-weight: bold;">{short.get('views', 0)}</span><br>
-                            <span style="color: {COLORS['text_secondary']}; font-size: 11px;">vues</span>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-    
+
     # ==================== ONGLET 3: OPTIMISATION IA ====================
     with tabs[2]:
         st.markdown(f"""
         <div class="glass-card">
             <h2>🧠 Optimisation IA</h2>
-            <p>L'IA analyse tes performances et te donne des conseils personnalisés.</p>
         </div>
         """, unsafe_allow_html=True)
-        
+
         analysis = analyze_viral_patterns(stats)
-        
-        st.markdown(f"""
-        <div class="glass-card" style="border-left: 4px solid {COLORS['accent']};">
-            <h3>💡 Recommandations personnalisées</h3>
-        </div>
-        """, unsafe_allow_html=True)
-        
+
         for suggestion in analysis['suggestions']:
             st.markdown(f"""
             <div class="glass-card" style="padding: 12px 20px; margin: 8px 0;">
                 <p style="margin: 0; color: white;">{suggestion}</p>
             </div>
             """, unsafe_allow_html=True)
-        
+
         col1, col2, col3 = st.columns(3)
-        
         with col1:
             st.markdown(f"""
             <div class="glass-card" style="text-align: center;">
@@ -898,7 +1283,6 @@ def main():
                 <h3 style="color: {COLORS['glow']}; margin: 5px 0;">{analysis['best_time']}</h3>
             </div>
             """, unsafe_allow_html=True)
-        
         with col2:
             st.markdown(f"""
             <div class="glass-card" style="text-align: center;">
@@ -906,7 +1290,6 @@ def main():
                 <h3 style="color: {COLORS['glow']}; margin: 5px 0;">{analysis['hook_style']}</h3>
             </div>
             """, unsafe_allow_html=True)
-        
         with col3:
             st.markdown(f"""
             <div class="glass-card" style="text-align: center;">
@@ -914,50 +1297,30 @@ def main():
                 <h3 style="color: {COLORS['glow']}; margin: 5px 0;">{analysis['optimal_duration']}</h3>
             </div>
             """, unsafe_allow_html=True)
-        
-        st.markdown(f"""
-        <div class="glass-card" style="margin-top: 20px;">
-            <h3>✨ Générer un script optimisé</h3>
-            <p>L'IA crée un script basé sur tes meilleures performances.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
+
         if st.button("⚡ GÉNÉRER UN SCRIPT OPTIMISÉ", use_container_width=True, disabled=not api_ok):
-            with st.spinner("L'IA analyse tes stats et crée le script parfait..."):
-                optimization_context = f"""
-                Contexte des performances actuelles:
-                - Rétention moyenne: {stats['avg_retention']}%
-                - Total shorts générés: {stats['generated_count']}
-                - Total shorts publiés: {stats['published_count']}
-                - Meilleur horaire: {analysis['best_time']}
-                - Style de hook optimal: {analysis['hook_style']}
-                
-                Crée un script qui maximise ces métriques.
+            with st.spinner("L'IA analyse tes stats..."):
+                opt_context = f"""
+                Contexte: Rétention {stats['avg_retention']}%, {stats['generated_count']} shorts générés.
+                Crée un script fun qui maximise ces métriques.
                 """
-                
-                script, error = generate_script(optimization_context)
-                
+                script, error = generate_script(opt_context)
                 if script:
                     st.markdown(f"""
                     <div class="glass-card" style="border: 2px solid {COLORS['success']};">
-                        <h3>🎯 Script optimisé par l'IA</h3>
-                        <pre style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; color: white; white-space: pre-wrap;">{script}</pre>
+                        <h3>🎯 Script optimisé</h3>
+                        <pre style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; color: white;">{script}</pre>
                     </div>
                     """, unsafe_allow_html=True)
-                    
                     st.download_button(
-                        label="📄 TÉLÉCHARGER LE SCRIPT OPTIMISÉ",
+                        label="📄 TÉLÉCHARGER",
                         data=script,
                         file_name=f"script_optimise_{int(time.time())}.txt",
                         mime="text/plain",
                         use_container_width=True
                     )
                 else:
-                    st.markdown(f"""
-                    <div class="alert-error">
-                        {error}
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown(f"""<div class="alert-error">{error}</div>""", unsafe_allow_html=True)
 
 # ============================================================
 # LANCEMENT
