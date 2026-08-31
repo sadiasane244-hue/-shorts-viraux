@@ -135,7 +135,6 @@ def parse_script(script_text):
 
     lines = script_text.split('\n')
     vocal_parts = []
-    current_section = None
 
     for line in lines:
         line = line.strip()
@@ -152,7 +151,6 @@ def parse_script(script_text):
             hook_text = line.split(':', 1)[1].strip() if ':' in line else line
             result['hook'] = hook_text
             vocal_parts.append(hook_text)
-            # Détecte si c'est un moment drôle pour un meme
             if any(mot in hook_text.lower() for mot in ['oublie', 'stupide', 'dingue', 'fou', 'incroyable', 'choc']):
                 result['meme_moments'].append({'time': 'hook', 'text': hook_text, 'type': 'shock'})
             continue
@@ -160,10 +158,8 @@ def parse_script(script_text):
         # Extraction des faits
         elif line.upper().startswith('FAIT') and ':' in line:
             fact_text = line.split(':', 1)[1].strip()
-            # Extrait les mots-clés entre astérisques
             keywords_in_fact = re.findall(r'\*\*(.*?)\*\*', fact_text)
             result['keywords'].extend(keywords_in_fact)
-            # Nettoie les astérisques pour la voix
             clean_fact = fact_text.replace('**', '')
             result['facts'].append({
                 'number': len(result['facts']) + 1,
@@ -171,7 +167,6 @@ def parse_script(script_text):
                 'keywords': keywords_in_fact
             })
             vocal_parts.append(f"Numéro {len(result['facts'])}. {clean_fact}")
-            # Détecte moments drôles pour memes
             if any(mot in clean_fact.lower() for mot in ['ridicule', 'absurde', 'bizarre', 'dingue', 'fou rire', 'marrant']):
                 result['meme_moments'].append({
                     'time': f'fact_{len(result["facts"])}',
@@ -195,14 +190,12 @@ def parse_script(script_text):
 
         # Ligne sans label = texte vocal direct
         else:
-            # Ignore les lignes qui sont juste des séparateurs
             if line in ['---', '***', '']:
                 continue
             clean_line = line.replace('**', '')
             vocal_parts.append(clean_line)
 
     # Assemble le texte vocal propre
-    # Ajoute des pauses naturelles entre les sections
     result['vocal_text'] = ' ... '.join(vocal_parts)
 
     # Si toujours vide, prend tout le script nettoyé
@@ -322,26 +315,22 @@ def search_images(query, count=5):
     return []
 
 def get_meme_image(meme_type):
-    """
-    Récupère une image meme/effet visuel basé sur le type.
-    Utilise des placeholders ou des APIs meme gratuites.
-    """
     meme_urls = {
         'shock': [
-            "https://i.imgur.com/2rm9A1P.jpg",  # Cerveau explosé
-            "https://i.imgur.com/J4k2Q1P.jpg",  # Mind blown
+            "https://i.imgur.com/2rm9A1P.jpg",
+            "https://i.imgur.com/J4k2Q1P.jpg",
         ],
         'funny': [
-            "https://i.imgur.com/3q8Q2L1.jpg",  # Rire
-            "https://i.imgur.com/9k2P3M4.jpg",  # Facepalm
+            "https://i.imgur.com/3q8Q2L1.jpg",
+            "https://i.imgur.com/9k2P3M4.jpg",
         ],
         'thinking': [
-            "https://i.imgur.com/5r7S8K2.jpg",  # Cerveau qui réfléchit
-            "https://i.imgur.com/1a3B4C5.jpg",  # Confusion
+            "https://i.imgur.com/5r7S8K2.jpg",
+            "https://i.imgur.com/1a3B4C5.jpg",
         ],
         'sleep': [
-            "https://i.imgur.com/7d2E4F1.jpg",  # Dormir
-            "https://i.imgur.com/4f6G8H3.jpg",  # Ronfler
+            "https://i.imgur.com/7d2E4F1.jpg",
+            "https://i.imgur.com/4f6G8H3.jpg",
         ]
     }
     urls = meme_urls.get(meme_type, meme_urls['funny'])
@@ -352,32 +341,19 @@ def get_meme_image(meme_type):
 # ============================================================
 
 def generate_audio(vocal_text, output_path="audio.mp3"):
-    """
-    Génère la voix off avec le texte VOCAL uniquement.
-    Pas de labels, pas d'astérisques, pas de hashtags.
-    """
     try:
         import edge_tts
 
         # Nettoie encore une fois par sécurité
         clean_text = vocal_text.replace('TITRE:', '').replace('HOOK:', '').replace('FAIT 1:', '').replace('FAIT 2:', '').replace('FAIT 3:', '').replace('CTA:', '').replace('HASHTAGS:', '').replace('**', '').replace('[MEME:', '').replace(']', '').strip()
 
-        # Remplace les "..." par des pauses réelles (SSML)
+        # Remplace les "..." par des pauses
         clean_text = clean_text.replace('...', '<break time="500ms"/>')
         clean_text = clean_text.replace('..', '<break time="300ms"/>')
 
-        # Voix française féminine naturelle et chaude
         voice = "fr-FR-DeniseNeural"
 
-        # Ajoute des balises SSML pour le rythme
-        ssml_text = f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="fr-FR">
-            <prosody rate="-5%" pitch="+0%">
-                {clean_text}
-            </prosody>
-        </speak>"""
-
         async def _generate():
-            # Edge TTS ne supporte pas toujours SSML, on essaie sans d'abord
             try:
                 communicate = edge_tts.Communicate(clean_text, voice)
                 await communicate.save(output_path)
@@ -403,7 +379,6 @@ def generate_thumbnail(title, output_path="thumbnail.jpg"):
         img = Image.new('RGB', (width, height), COLORS['gradient_start'])
         draw = ImageDraw.Draw(img)
 
-        # Dégradé de fond animé
         for y in range(height):
             ratio = y / height
             r = int(int(COLORS['gradient_start'][1:3], 16) * (1-ratio) + int(COLORS['gradient_end'][1:3], 16) * ratio)
@@ -411,7 +386,6 @@ def generate_thumbnail(title, output_path="thumbnail.jpg"):
             b = int(int(COLORS['gradient_start'][5:7], 16) * (1-ratio) + int(COLORS['gradient_end'][5:7], 16) * ratio)
             draw.line([(0, y), (width, y)], fill=(r, g, b))
 
-        # Titre principal avec glow
         try:
             font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 90)
             font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 45)
@@ -421,7 +395,6 @@ def generate_thumbnail(title, output_path="thumbnail.jpg"):
             font_small = ImageFont.load_default()
             font_emoji = ImageFont.load_default()
 
-        # Titre en 2 lignes max
         wrapped = textwrap.fill(title.upper(), width=10)
         bbox = draw.multilinebbox((0, 0), wrapped, font=font_large)
         text_w = bbox[2] - bbox[0]
@@ -429,18 +402,14 @@ def generate_thumbnail(title, output_path="thumbnail.jpg"):
         x = (width - text_w) // 2
         y = height // 3
 
-        # Glow effect
         for offset in range(8, 0, -1):
             draw.multiline_text((x+offset, y+offset), wrapped, font=font_large, fill=(0,0,0))
 
-        # Texte principal avec couleur glow
         draw.multiline_text((x, y), wrapped, font=font_large, fill=COLORS['glow'])
 
-        # Sous-titre
         subtitle = "🧠 PSYCHOLOGIE"
         draw.text((width//2 - 200, y + text_h + 60), subtitle, font=font_emoji, fill=COLORS['accent'])
 
-        # Barre de progression décorative en bas
         bar_y = height - 100
         draw.rounded_rectangle([(50, bar_y), (width-50, bar_y+20)], radius=10, fill=(50,50,50))
         draw.rounded_rectangle([(50, bar_y), (width//2, bar_y+20)], radius=10, fill=COLORS['primary'])
@@ -454,16 +423,11 @@ def generate_thumbnail(title, output_path="thumbnail.jpg"):
 # GÉNÉRATION DES SOUS-TITRES SRT
 # ============================================================
 
-def generate_srt(parsed_script, audio_duration=45, output_path="subtitles.srt"):
-    """
-    Génère un fichier SRT synchronisé avec les segments du script.
-    Estime les timings basés sur la durée audio totale.
-    """
+def generate_srt(parsed_script, output_path="subtitles.srt"):
     try:
         segments = []
         current_time = 0
 
-        # Hook (0-5s)
         if parsed_script['hook']:
             duration = 5
             segments.append({
@@ -473,7 +437,6 @@ def generate_srt(parsed_script, audio_duration=45, output_path="subtitles.srt"):
             })
             current_time += duration
 
-        # Facts (5-35s, ~10s chacun)
         for fact in parsed_script['facts']:
             duration = 10
             segments.append({
@@ -483,7 +446,6 @@ def generate_srt(parsed_script, audio_duration=45, output_path="subtitles.srt"):
             })
             current_time += duration
 
-        # CTA (35-45s)
         if parsed_script['cta']:
             duration = 10
             segments.append({
@@ -492,7 +454,6 @@ def generate_srt(parsed_script, audio_duration=45, output_path="subtitles.srt"):
                 'text': parsed_script['cta']
             })
 
-        # Génère le fichier SRT
         srt_content = ""
         for i, seg in enumerate(segments):
             start = format_time(seg['start'])
@@ -507,7 +468,6 @@ def generate_srt(parsed_script, audio_duration=45, output_path="subtitles.srt"):
         return None
 
 def format_time(seconds):
-    """Formatte le temps en SRT: HH:MM:SS,mmm"""
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
@@ -519,21 +479,11 @@ def format_time(seconds):
 # ============================================================
 
 def create_video(parsed_script, images, audio_path, meme_moments, output_path="short.mp4"):
-    """
-    Assemble le short 9:16 avec:
-    - Images de fond avec Ken Burns
-    - Texte overlay (hook, facts, CTA)
-    - Compteurs visuels (1, 2, 3)
-    - Barre de progression
-    - Memes aux bons moments
-    """
     try:
         from moviepy.editor import (ImageClip, AudioFileClip, concatenate_videoclips,
                                     CompositeVideoClip, TextClip, ColorClip)
-        from moviepy.video.fx.all import fadein, fadeout
         import numpy as np
 
-        # Durées des segments
         hook_duration = 5
         fact_duration = 10
         cta_duration = 8
@@ -542,7 +492,7 @@ def create_video(parsed_script, images, audio_path, meme_moments, output_path="s
         clips = []
         current_time = 0
 
-        # ===== SEGMENT HOOK (0-5s) =====
+        # SEGMENT HOOK (0-5s)
         hook_img = images[0] if len(images) > 0 else None
         if hook_img:
             try:
@@ -552,10 +502,8 @@ def create_video(parsed_script, images, audio_path, meme_moments, output_path="s
         else:
             hook_clip = create_color_clip(hook_duration, COLORS['primary'])
 
-        # Zoom rapide sur le hook (effet choc)
         hook_clip = hook_clip.resize(lambda t: 1 + 0.15 * t / hook_duration)
 
-        # Texte hook avec style "alerte"
         hook_text = parsed_script['hook']
         try:
             txt_hook = TextClip(hook_text[:60], fontsize=55, color='white',
@@ -569,7 +517,7 @@ def create_video(parsed_script, images, audio_path, meme_moments, output_path="s
         clips.append(hook_clip)
         current_time += hook_duration
 
-        # ===== SEGMENTS FACTS (5-35s) =====
+        # SEGMENTS FACTS (5-35s)
         for i, fact in enumerate(parsed_script['facts']):
             fact_img = images[i+1] if (i+1) < len(images) else None
             if fact_img:
@@ -580,10 +528,8 @@ def create_video(parsed_script, images, audio_path, meme_moments, output_path="s
             else:
                 fact_clip = create_color_clip(fact_duration)
 
-            # Ken Burns subtil
             fact_clip = fact_clip.resize(lambda t: 1 + 0.05 * np.sin(t * 2))
 
-            # Compteur visuel (1, 2, 3) en grand
             try:
                 counter = TextClip(str(fact['number']), fontsize=120, color=COLORS['accent'],
                                   font='DejaVu-Sans-Bold', stroke_color='black', stroke_width=4)
@@ -591,7 +537,6 @@ def create_video(parsed_script, images, audio_path, meme_moments, output_path="s
             except:
                 counter = None
 
-            # Texte du fait
             try:
                 fact_text = TextClip(fact['text'][:80], fontsize=45, color='white',
                                     font='DejaVu-Sans-Bold', stroke_color='black', stroke_width=2,
@@ -600,7 +545,6 @@ def create_video(parsed_script, images, audio_path, meme_moments, output_path="s
             except:
                 fact_text = None
 
-            # Mots-clés en couleur
             if fact['keywords']:
                 keyword_text = " • ".join(fact['keywords'][:3])
                 try:
@@ -610,7 +554,6 @@ def create_video(parsed_script, images, audio_path, meme_moments, output_path="s
                 except:
                     kw_clip = None
 
-            # Assemble le clip du fait
             fact_elements = [fact_clip]
             if counter: fact_elements.append(counter)
             if fact_text: fact_elements.append(fact_text)
@@ -620,7 +563,7 @@ def create_video(parsed_script, images, audio_path, meme_moments, output_path="s
             clips.append(fact_composite)
             current_time += fact_duration
 
-        # ===== SEGMENT CTA (35-43s) =====
+        # SEGMENT CTA (35-43s)
         cta_clip = create_color_clip(cta_duration, COLORS['secondary'])
         try:
             cta_text = TextClip(parsed_script['cta'][:80], fontsize=50, color='white',
@@ -632,29 +575,24 @@ def create_video(parsed_script, images, audio_path, meme_moments, output_path="s
             pass
         clips.append(cta_clip)
 
-        # Assemble tous les clips
         final = concatenate_videoclips(clips, method="compose")
 
-        # Ajoute la barre de progression en bas
+        # Barre de progression
         try:
             from moviepy.editor import RectangleClip
             progress = RectangleClip(size=(0, 10), color=COLORS['primary'])
-            # Barre qui grandit avec le temps
             progress = progress.resize(lambda t: (int(1080 * t / total_duration), 10))
             progress = progress.set_position(('left', 'bottom')).set_duration(total_duration)
             final = CompositeVideoClip([final, progress])
         except:
             pass
 
-        # Ajoute l'audio
         if audio_path and os.path.exists(audio_path):
             audio = AudioFileClip(audio_path)
-            # Ajuste la durée audio si nécessaire
             if audio.duration > total_duration:
                 audio = audio.subclip(0, total_duration)
             final = final.set_audio(audio)
 
-        # Export 9:16
         final.write_videofile(output_path, fps=24, codec='libx264',
                              audio_codec='aac', threads=2,
                              preset='ultrafast', logger=None,
@@ -663,7 +601,6 @@ def create_video(parsed_script, images, audio_path, meme_moments, output_path="s
         return output_path
 
     except Exception as e:
-        # Fallback: crée une vidéo basique si MoviePy échoue
         return create_simple_video(parsed_script, images, audio_path, output_path)
 
 def create_color_clip(duration, color=None):
@@ -676,17 +613,11 @@ def create_color_clip(duration, color=None):
         return None
 
 def create_simple_video(parsed_script, images, audio_path, output_path):
-    """
-    Vidéo fallback ultra-simple si MoviePy complet échoue.
-    Utilise ffmpeg directement.
-    """
     try:
         import subprocess
         import tempfile
 
-        # Crée un slideshow d'images avec ffmpeg
         if images:
-            # Télécharge les images temporairement
             temp_dir = tempfile.mkdtemp()
             image_files = []
             for i, img_url in enumerate(images[:5]):
@@ -701,14 +632,12 @@ def create_simple_video(parsed_script, images, audio_path, output_path):
                     pass
 
             if image_files:
-                # Crée un fichier concat pour ffmpeg
                 concat_file = os.path.join(temp_dir, "concat.txt")
                 with open(concat_file, 'w') as f:
                     for img in image_files:
                         f.write(f"file '{img}'\n")
                         f.write(f"duration 3\n")
 
-                # Génère la vidéo avec ffmpeg
                 cmd = [
                     'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
                     '-i', concat_file,
@@ -732,7 +661,6 @@ def create_simple_video(parsed_script, images, audio_path, output_path):
                 if os.path.exists(output_path):
                     return output_path
 
-        # Si tout échoue, retourne None
         return None
     except:
         return None
@@ -1068,11 +996,11 @@ def main():
 
                     if images:
                         st.markdown(f"<p style='color: {COLORS['success']};'>✅ {len(images)} images trouvées</p>", unsafe_allow_html=True)
-                        # Affiche les miniatures
+                        # CORRECTION: use_container_width au lieu de use_column_width
                         cols = st.columns(min(len(images), 5))
                         for i, img_url in enumerate(images[:5]):
                             with cols[i]:
-                                st.image(img_url, use_column_width=True)
+                                st.image(img_url, use_container_width=True)
                     else:
                         st.markdown(f"<p style='color: {COLORS['warning']};'>⚠️ Images fallback utilisées</p>", unsafe_allow_html=True)
 
@@ -1111,7 +1039,8 @@ def main():
                     thumb_path = generate_thumbnail(parsed['title'] or "Short Viral")
                     if thumb_path:
                         st.markdown(f"<p style='color: {COLORS['success']};'>✅ Miniature créée</p>", unsafe_allow_html=True)
-                        st.image(thumb_path, caption="Miniature 9:16", use_column_width=True)
+                        # CORRECTION: use_container_width au lieu de use_column_width
+                        st.image(thumb_path, caption="Miniature 9:16", use_container_width=True)
 
                     # Étape 6: Montage vidéo
                     status.markdown(f"<p style='color: {COLORS['glow']};'>🎬 Étape 6/6: Montage vidéo 9:16 automatique...</p>", unsafe_allow_html=True)
@@ -1143,7 +1072,6 @@ def main():
                                 use_container_width=True
                             )
 
-                        # Met à jour les stats
                         stats['generated_count'] += 1
                         stats['shorts'].append({
                             'id': int(time.time()),
@@ -1159,7 +1087,6 @@ def main():
                         progress_bar.progress(100)
                         status.markdown(f"<p style='color: {COLORS['warning']};'>⚠️ Montage vidéo limité sur Render Free</p>", unsafe_allow_html=True)
 
-                        # Offre le pack complet (script + audio + sous-titres + miniature)
                         st.markdown(f"""
                         <div class="glass-card">
                             <h3>📦 Pack de contenu généré:</h3>
@@ -1174,7 +1101,6 @@ def main():
                         </div>
                         """, unsafe_allow_html=True)
 
-                        # Téléchargements individuels
                         col1, col2 = st.columns(2)
                         with col1:
                             st.download_button(
