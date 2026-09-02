@@ -8,10 +8,17 @@ import tempfile
 import asyncio
 import requests
 from PIL import Image
+import streamlit as st
 
 # ---------------------------------------------------------
-# CONFIGURATION
+# CONFIGURATION STREAMLIT & VARIABLES
 # ---------------------------------------------------------
+st.set_page_config(
+    page_title="Générateur de Shorts Viraux",
+    page_icon="🎬",
+    layout="centered"
+)
+
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct"
@@ -20,12 +27,8 @@ OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct"
 # GENERATION DE SCRIPT VIRAL & ETHIQUE
 # ---------------------------------------------------------
 def generate_script(subject=None):
-    """
-    Génère un script viral, moderne et captivant en respectant
-    des consignes éthiques strictes et un formatage précis.
-    """
     if not OPENROUTER_API_KEY:
-        return None, "❌ Clé OpenRouter manquante."
+        return None, "❌ Clé OpenRouter manquante dans les variables d'environnement."
 
     topics = [
         "pourquoi ton cerveau te fait procrastiner au pire moment",
@@ -54,7 +57,7 @@ RÈGLES ÉTHIQUES STRICTES:
 - Le script doit captiver dès les 2 premières secondes.
 
 RÈGLE DES MEMES:
-Insère la balise [MEME: description courte de l'émotion ou de la réaction drôle] immédiatement après le HOOK et après chaque FAIT.
+Insère la balise [MEME: description courte de l'émotion] immédiatement après le HOOK et après chaque FAIT.
 
 FORMAT STRICT DE RÉPONSE:
 TITRE: [titre court]
@@ -97,9 +100,6 @@ HASHTAGS: [5 hashtags viraux]"""
         return None, f"❌ Erreur connexion: {str(e)}"
 
 def parse_script(script_text):
-    """
-    Extrait les éléments du script pour la narration et les sous-titres.
-    """
     clean_lines = []
     memes = []
     
@@ -108,12 +108,10 @@ def parse_script(script_text):
         if not line:
             continue
             
-        # Extraction des suggestions de memes
         meme_matches = re.findall(r'\[MEME:\s*(.*?)\]', line)
         for m in meme_matches:
             memes.append(m)
             
-        # Nettoyage des balises pour la voix off
         cleaned = re.sub(r'\[MEME:\s*.*?\]', '', line)
         cleaned = re.sub(r'^(TITRE|HOOK|FAIT \d|CTA|HASHTAGS):\s*', '', cleaned)
         cleaned = cleaned.replace('*', '').strip()
@@ -123,15 +121,13 @@ def parse_script(script_text):
 
     narration_text = " ".join(clean_lines)
     return narration_text, memes
+
 # ---------------------------------------------------------
 # GENERATION AUDIO (Edge-TTS)
 # ---------------------------------------------------------
 async def generate_audio_async(text, output_mp3):
-    """
-    Génère la voix off dynamique avec Edge-TTS en français.
-    """
     import edge_tts
-    voice = "fr-FR-HenriNeural"  # Voix dynamique et expressive
+    voice = "fr-FR-HenriNeural"
     communicate = edge_tts.Communicate(text, voice, rate="+5%")
     await communicate.save(output_mp3)
 
@@ -145,13 +141,9 @@ def generate_audio(text, output_mp3="narration.mp3"):
         return None, f"❌ Erreur Edge-TTS: {str(e)}"
 
 # ---------------------------------------------------------
-# GENERATION DE SOUS-TITRES SYNCHRONISÉS (Format ASS)
+# SOUS-TITRES & IMAGES
 # ---------------------------------------------------------
 def generate_ass_subtitles(text, output_ass="subtitles.ass"):
-    """
-    Crée un fichier de sous-titres .ass vertical (style Shorts/TikTok)
-    avec texte jaune/blanc centré et contour noir épais.
-    """
     header = """[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -165,10 +157,7 @@ Style: Default,Arial,65,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     words = text.split()
-    lines = []
-    chunk_size = 3  # 3 mots par ligne pour maximiser la rétention
-    
-    # Estimation basique du timing (approx. 0.35s par mot)
+    chunk_size = 3
     current_time = 0.0
     word_duration = 0.35
 
@@ -188,22 +177,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             start_str = format_time(start_sec)
             end_str = format_time(end_sec)
-            
-            # Mot mis en valeur en jaune
-            formatted_chunk = chunk.replace("**", "{\\c&H00FFFF&}").replace("**", "{\\c&H00FFFFFF&}")
-            f.write(f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{formatted_chunk}\n")
-            
+            f.write(f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{chunk}\n")
             current_time = end_sec
 
     return output_ass
 
-# ---------------------------------------------------------
-# RÉCUPÉRATION OU CRÉATION DES IMAGES D'ILLUSTRATION
-# ---------------------------------------------------------
 def fetch_placeholder_images(temp_dir, count=5):
-    """
-    Génère des fonds d'écran verticaux dynamiques en cas d'absence d'images Web.
-    """
     images = []
     colors = [(25, 30, 45), (40, 20, 50), (15, 45, 60), (50, 35, 25), (30, 40, 30)]
     for i in range(count):
@@ -212,23 +191,18 @@ def fetch_placeholder_images(temp_dir, count=5):
         img.save(img_path)
         images.append(img_path)
     return images
+
 # ---------------------------------------------------------
-# ASSEMBLAGE VIDÉO FFMPEG DIRECT (Subprocess)
+# ASSEMBLAGE VIDÉO FFMPEG DIRECT
 # ---------------------------------------------------------
 def create_video_ffmpeg(images, audio_path, ass_subtitles_path, output_path="short_viral.mp4"):
-    """
-    Exécute FFmpeg directement via subprocess sans aucune dépendance lourde.
-    Applique le Zoompan dynamique + sous-titres incrustés + audio synchro.
-    """
     try:
         temp_dir = tempfile.mkdtemp()
-
         if not images:
             images = fetch_placeholder_images(temp_dir)
 
-        # Création du fichier de concaténation des images
         concat_file = os.path.join(temp_dir, "input.txt")
-        segment_duration = 3.0  # Changement d'image toutes les 3s (Pattern Interrupt)
+        segment_duration = 3.0
 
         with open(concat_file, 'w', encoding='utf-8') as f:
             for img_p in images:
@@ -244,15 +218,12 @@ def create_video_ffmpeg(images, audio_path, ass_subtitles_path, output_path="sho
         if audio_path and os.path.exists(audio_path):
             cmd.extend(['-i', audio_path])
 
-        # Filtre FFmpeg : Zoompan (Zoom dynamique) + Ratio 9:16 + Subtitles ASS
         filter_complex = (
             "[0:v]scale=1280:2275,zoompan=z='min(zoom+0.0015,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=125:s=1080x1920:fps=25,"
             "format=yuv420p[v_zoom]"
         )
 
-        # Si le fichier de sous-titres existe, on l'incruste
         if ass_subtitles_path and os.path.exists(ass_subtitles_path):
-            # Échappement des caractères pour le chemin sous-titres dans FFmpeg
             clean_ass_path = ass_subtitles_path.replace("\\", "/").replace(":", "\\:")
             filter_complex += f";[v_zoom]subtitles='{clean_ass_path}'[v]"
             map_video_label = '[v]'
@@ -274,58 +245,63 @@ def create_video_ffmpeg(images, audio_path, ass_subtitles_path, output_path="sho
             output_path
         ])
 
-        print("🎬 Lancement de l'assemblage FFmpeg...")
         result = subprocess.run(cmd, capture_output=True, text=True)
 
         if result.returncode == 0 and os.path.exists(output_path):
             return output_path, None
         else:
-            return None, f"❌ Erreur FFmpeg: {result.stderr[-400:]}"
+            return None, f"❌ Erreur FFmpeg: {result.stderr[-300:]}"
             
     except Exception as e:
         return None, f"❌ Erreur exécution FFmpeg: {str(e)}"
 
 # ---------------------------------------------------------
-# PIPELINE PRINCIPAL (EXÉCUTION DU PROJET)
+# INTERFACE UTILISATEUR STREAMLIT
 # ---------------------------------------------------------
-def run_pipeline(subject=None):
-    """
-    Orchestre la création complète du Short de A à Z.
-    """
-    print("1️⃣ Génération du script viral...")
-    script, err = generate_script(subject)
-    if err:
-        print(err)
-        return
+st.title("🎬 Générateur de Shorts Viraux")
+st.write("Générez des scripts, voix-off et vidéos TikTok / Shorts en un clic.")
 
-    print("\n--- SCRIPT GÉNÉRÉ ---")
-    print(script)
-    print("---------------------\n")
+subject_input = st.text_input(
+    "Sujet de la vidéo (optionnel) :", 
+    placeholder="Ex: Pourquoi on procrastine ?"
+)
 
-    narration_text, memes = parse_script(script)
+if st.button("🚀 Générer la Vidéo"):
+    with st.spinner("Génération du script et du rendu en cours..."):
+        # Step 1: Script
+        script, err = generate_script(subject_input if subject_input else None)
+        if err:
+            st.error(err)
+            st.stop()
+            
+        st.subheader("📝 Script Généré")
+        st.info(script)
 
-    print("2️⃣ Génération de la voix off (Edge-TTS)...")
-    audio_file, err = generate_audio(narration_text, "voiceover.mp3")
-    if err:
-        print(err)
-        return
+        # Step 2: Parse & Audio
+        narration_text, memes = parse_script(script)
+        audio_file, err = generate_audio(narration_text, "voiceover.mp3")
+        if err:
+            st.error(err)
+            st.stop()
 
-    print("3️⃣ Génération des sous-titres ASS...")
-    ass_file = generate_ass_subtitles(narration_text, "subtitles.ass")
+        # Step 3: Subtitles & Video
+        ass_file = generate_ass_subtitles(narration_text, "subtitles.ass")
+        temp_dir = tempfile.mkdtemp()
+        images = fetch_placeholder_images(temp_dir, count=6)
 
-    print("4️⃣ Création des visuels...")
-    temp_dir = tempfile.mkdtemp()
-    images = fetch_placeholder_images(temp_dir, count=6)
+        final_video, err = create_video_ffmpeg(images, audio_file, ass_file, "short_viral_final.mp4")
 
-    print("5️⃣ Montage et rendu vidéo final via FFmpeg...")
-    final_video, err = create_video_ffmpeg(images, audio_file, ass_file, "short_viral_final.mp4")
-
-    if final_video:
-        print(f"\n✅ SUCCÈS ! Vidéo générée avec succès : {final_video}")
-    else:
-        print(f"\n❌ ÉCHEC : {err}")
-
-if __name__ == "__main__":
-    # Test d'exécution direct
-    run_pipeline()
-
+        # Step 4: Display Result
+        if final_video and os.path.exists(final_video):
+            st.success("✅ Vidéo générée avec succès !")
+            st.video(final_video)
+            
+            with open(final_video, "rb") as file:
+                st.download_button(
+                    label="📥 Télécharger la vidéo MP4",
+                    data=file,
+                    file_name="short_viral.mp4",
+                    mime="video/mp4"
+                )
+        else:
+            st.error(f"Erreur lors de la création de la vidéo : {err}")
