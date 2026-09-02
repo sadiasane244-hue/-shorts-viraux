@@ -14,7 +14,7 @@ import streamlit as st
 # CONFIGURATION STREAMLIT & VARIABLES
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Générateur de Shorts Viraux",
+    page_title="Générateur Vidéo IA",
     page_icon="🎬",
     layout="centered"
 )
@@ -24,9 +24,9 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct"
 
 # ---------------------------------------------------------
-# GENERATION DE SCRIPT VIRAL & ETHIQUE
+# GENERATION DE SCRIPT (SHORT & LONG)
 # ---------------------------------------------------------
-def generate_script(subject=None):
+def generate_script(subject=None, mode="short"):
     if not OPENROUTER_API_KEY:
         return None, "❌ Clé OpenRouter manquante dans les variables d'environnement."
 
@@ -41,40 +41,55 @@ def generate_script(subject=None):
     if not subject:
         subject = random.choice(topics)
 
-    system_prompt = """Tu es un créateur de contenu viral pour TikTok et Shorts.
-Tu écris des scripts HYPER CAPTIVANTS, modernes et amusants sur la psychologie et le cerveau.
+    if mode == "short":
+        system_prompt = """Tu es un créateur de contenu viral pour TikTok et YouTube Shorts.
+Tu écris des scripts HYPER CAPTIVANTS (30-45s), modernes et amusants sur la psychologie et le cerveau.
 
 STYLE ET TON:
 - Dynamique, percutant, énergique avec un tutoiement direct.
-- Utilise des accroches modernes ("Attends...", "Regarde ça...", "C'est complètement fou", "Ton cerveau te ment").
+- Accroches modernes ("Attends...", "Regarde ça...", "C'est complètement fou").
 - Humour intelligent et situationnel.
-- BOUCLE PARFAITE : Fais en sorte que la dernière phrase du CTA s'enchaîne naturellement avec le premier mot du HOOK pour créer un loop infini.
+- BOUCLE PARFAITE : La dernière phrase du CTA doit s'enchaîner avec la première du HOOK.
 
 RÈGLES ÉTHIQUES STRICTES:
-- ZÉRO vulgarité, zéro insulte, zéro argot grossier.
-- NE PARLE JAMAIS de "Mère Nature" ni d'évolution. Utilise des termes scientifiques neutres : "Le cerveau humain", "Notre biologie", "La façon dont le corps fonctionne".
-- Zéro mention de musique, zéro mention de religion/Islam, zéro sujet inapproprié.
-- Le script doit captiver dès les 2 premières secondes.
+- ZÉRO vulgarité, zéro insulte.
+- NE PARLE JAMAIS de "Mère Nature" ni d'évolution. Utilise : "Le cerveau humain", "Notre biologie".
+- Zéro mention de musique, zéro mention de religion.
 
-RÈGLE DES MEMES:
-Insère la balise [MEME: description courte de l'émotion] immédiatement après le HOOK et après chaque FAIT.
-
-FORMAT STRICT DE RÉPONSE:
+FORMAT STRICT:
 TITRE: [titre court]
 HOOK: [Phrase d'accroche choc] [MEME: réaction surprise]
 FAIT 1: [Premier fait scientifique avec **mots-clés** en gras] [MEME: réaction drôle]
-FAIT 2: [Deuxième fait scientifique avec **mots-clés** en gras] [MEME: réaction réflexion]
-FAIT 3: [Troisième fait scientifique avec **mots-clés** en gras] [MEME: réaction choc]
-CTA: [Call to action court posant une question engageante pour lancer des commentaires]
+FAIT 2: [Deuxième fait scientifique avec **mots-clés** en gras] [MEME: réflexion]
+FAIT 3: [Troisième fait scientifique avec **mots-clés** en gras] [MEME: choc]
+CTA: [Call to action court posant une question engageante]
 HASHTAGS: [5 hashtags viraux]"""
+    else:
+        system_prompt = """Tu es un vulgarisateur scientifique pour des vidéos longues YouTube (16:9).
+Tu écris des scripts structurés, captivants, pédagogiques et amusants (durée 2 à 3 minutes).
 
-    user_prompt = f"Crée un script court, moderne et fun sur : {subject}"
+STYLE ET TON:
+- Professionnel mais accessible, engageant avec tutoiement ou adressage direct à l'audience.
+- Explications claires, exemples concrets de la vie quotidienne.
+- ZÉRO vulgarité, zéro mention de "Mère Nature" ou théorie de l'évolution (parle de biologie, physiologie, cerveau).
+
+FORMAT STRICT:
+TITRE: [Titre accrocheur YouTube]
+INTRO: [Introduction captivante posant le problème]
+PARTIE 1: [Titre et explications du premier concept]
+PARTIE 2: [Titre et explications du deuxième concept]
+PARTIE 3: [Titre et explications du troisième concept]
+CONCLUSION: [Résumé rapide et conseils pratiques]
+CTA: [Invitation à s'abonner et poser une question en commentaire]
+HASHTAGS: [5 hashtags YouTube]"""
+
+    user_prompt = f"Crée un script ({mode}) moderne, fun et instructif sur : {subject}"
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
         "HTTP-Referer": "https://shorts-viraux.render.com",
-        "X-Title": "Shorts Viraux Generator"
+        "X-Title": "Video Generator"
     }
 
     payload = {
@@ -83,12 +98,12 @@ HASHTAGS: [5 hashtags viraux]"""
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.88,
-        "max_tokens": 800
+        "temperature": 0.85,
+        "max_tokens": 1500 if mode == "long" else 800
     }
 
     try:
-        response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=30)
+        response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=40)
         if response.status_code == 200:
             data = response.json()
             if 'choices' in data and len(data['choices']) > 0:
@@ -113,7 +128,7 @@ def parse_script(script_text):
             memes.append(m)
             
         cleaned = re.sub(r'\[MEME:\s*.*?\]', '', line)
-        cleaned = re.sub(r'^(TITRE|HOOK|FAIT \d|CTA|HASHTAGS):\s*', '', cleaned)
+        cleaned = re.sub(r'^(TITRE|HOOK|INTRO|PARTIE \d|CONCLUSION|FAIT \d|CTA|HASHTAGS):\s*', '', cleaned)
         cleaned = cleaned.replace('*', '').strip()
         
         if cleaned and not line.startswith('TITRE:') and not line.startswith('HASHTAGS:'):
@@ -141,23 +156,28 @@ def generate_audio(text, output_mp3="narration.mp3"):
         return None, f"❌ Erreur Edge-TTS: {str(e)}"
 
 # ---------------------------------------------------------
-# SOUS-TITRES & IMAGES
+# SOUS-TITRES ASS (Format Vertical vs Horizontal)
 # ---------------------------------------------------------
-def generate_ass_subtitles(text, output_ass="subtitles.ass"):
-    header = """[Script Info]
+def generate_ass_subtitles(text, output_ass="subtitles.ass", is_short=True):
+    res_x = 1080 if is_short else 1920
+    res_y = 1920 if is_short else 1080
+    font_size = 65 if is_short else 48
+    margin_v = 900 if is_short else 120
+
+    header = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: {res_x}
+PlayResY: {res_y}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,65,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,0,2,50,50,900,1
+Style: Default,Arial,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,0,2,50,50,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     words = text.split()
-    chunk_size = 3
+    chunk_size = 3 if is_short else 6
     current_time = 0.0
     word_duration = 0.35
 
@@ -182,12 +202,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     return output_ass
 
-def fetch_placeholder_images(temp_dir, count=5):
+def fetch_placeholder_images(temp_dir, count=6, is_short=True):
     images = []
-    colors = [(25, 30, 45), (40, 20, 50), (15, 45, 60), (50, 35, 25), (30, 40, 30)]
+    width, height = (1080, 1920) if is_short else (1920, 1080)
+    colors = [(25, 30, 45), (40, 20, 50), (15, 45, 60), (50, 35, 25), (30, 40, 30), (20, 30, 50)]
     for i in range(count):
         img_path = os.path.join(temp_dir, f"bg_{i}.jpg")
-        img = Image.new('RGB', (1080, 1920), color=colors[i % len(colors)])
+        img = Image.new('RGB', (width, height), color=colors[i % len(colors)])
         img.save(img_path)
         images.append(img_path)
     return images
@@ -195,14 +216,14 @@ def fetch_placeholder_images(temp_dir, count=5):
 # ---------------------------------------------------------
 # ASSEMBLAGE VIDÉO FFMPEG DIRECT
 # ---------------------------------------------------------
-def create_video_ffmpeg(images, audio_path, ass_subtitles_path, output_path="short_viral.mp4"):
+def create_video_ffmpeg(images, audio_path, ass_subtitles_path, output_path="video_output.mp4", is_short=True):
     try:
         temp_dir = tempfile.mkdtemp()
         if not images:
-            images = fetch_placeholder_images(temp_dir)
+            images = fetch_placeholder_images(temp_dir, is_short=is_short)
 
         concat_file = os.path.join(temp_dir, "input.txt")
-        segment_duration = 3.0
+        segment_duration = 3.0 if is_short else 5.0
 
         with open(concat_file, 'w', encoding='utf-8') as f:
             for img_p in images:
@@ -218,10 +239,16 @@ def create_video_ffmpeg(images, audio_path, ass_subtitles_path, output_path="sho
         if audio_path and os.path.exists(audio_path):
             cmd.extend(['-i', audio_path])
 
-        filter_complex = (
-            "[0:v]scale=1280:2275,zoompan=z='min(zoom+0.0015,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=125:s=1080x1920:fps=25,"
-            "format=yuv420p[v_zoom]"
-        )
+        if is_short:
+            filter_complex = (
+                "[0:v]scale=1280:2275,zoompan=z='min(zoom+0.0015,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=125:s=1080x1920:fps=25,"
+                "format=yuv420p[v_zoom]"
+            )
+        else:
+            filter_complex = (
+                "[0:v]scale=2048:1152,zoompan=z='min(zoom+0.0012,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=125:s=1920x1080:fps=25,"
+                "format=yuv420p[v_zoom]"
+            )
 
         if ass_subtitles_path and os.path.exists(ass_subtitles_path):
             clean_ass_path = ass_subtitles_path.replace("\\", "/").replace(":", "\\:")
@@ -256,52 +283,80 @@ def create_video_ffmpeg(images, audio_path, ass_subtitles_path, output_path="sho
         return None, f"❌ Erreur exécution FFmpeg: {str(e)}"
 
 # ---------------------------------------------------------
-# INTERFACE UTILISATEUR STREAMLIT
+# INTERFACE UTILISATEUR STREAMLIT (TABS)
 # ---------------------------------------------------------
-st.title("🎬 Générateur de Shorts Viraux")
-st.write("Générez des scripts, voix-off et vidéos TikTok / Shorts en un clic.")
+st.title("🎬 Studio de Création Vidéo IA")
 
-subject_input = st.text_input(
-    "Sujet de la vidéo (optionnel) :", 
-    placeholder="Ex: Pourquoi on procrastine ?"
-)
+tab_short, tab_long = st.tabs(["📱 Short Court (YouTube Shorts / TikTok)", "🎥 Vidéo Longue (YouTube 16:9)"])
 
-if st.button("🚀 Générer la Vidéo"):
-    with st.spinner("Génération du script et du rendu en cours..."):
-        # Step 1: Script
-        script, err = generate_script(subject_input if subject_input else None)
-        if err:
-            st.error(err)
-            st.stop()
-            
-        st.subheader("📝 Script Généré")
-        st.info(script)
+# ----------------- ONGLET 1 : SHORT COURT -----------------
+with tab_short:
+    st.header("Format Vertical (9:16)")
+    st.caption("Optimisé pour YouTube Shorts, TikTok et Reels avec rythme rapide et sous-titres dynamiques.")
 
-        # Step 2: Parse & Audio
-        narration_text, memes = parse_script(script)
-        audio_file, err = generate_audio(narration_text, "voiceover.mp3")
-        if err:
-            st.error(err)
-            st.stop()
+    subject_short = st.text_input("Sujet du Short (optionnel) :", placeholder="Ex: Pourquoi le cerveau procrastine ?", key="short_subject")
 
-        # Step 3: Subtitles & Video
-        ass_file = generate_ass_subtitles(narration_text, "subtitles.ass")
-        temp_dir = tempfile.mkdtemp()
-        images = fetch_placeholder_images(temp_dir, count=6)
+    if st.button("🚀 Générer le Short Court", key="btn_short"):
+        with st.spinner("Génération du Short en cours..."):
+            script, err = generate_script(subject_short if subject_short else None, mode="short")
+            if err:
+                st.error(err)
+            else:
+                st.subheader("📝 Script Généré")
+                st.info(script)
 
-        final_video, err = create_video_ffmpeg(images, audio_file, ass_file, "short_viral_final.mp4")
+                narration_text, memes = parse_script(script)
+                audio_file, err = generate_audio(narration_text, "short_voice.mp3")
+                
+                if err:
+                    st.error(err)
+                else:
+                    ass_file = generate_ass_subtitles(narration_text, "short_subs.ass", is_short=True)
+                    temp_dir = tempfile.mkdtemp()
+                    images = fetch_placeholder_images(temp_dir, count=6, is_short=True)
 
-        # Step 4: Display Result
-        if final_video and os.path.exists(final_video):
-            st.success("✅ Vidéo générée avec succès !")
-            st.video(final_video)
-            
-            with open(final_video, "rb") as file:
-                st.download_button(
-                    label="📥 Télécharger la vidéo MP4",
-                    data=file,
-                    file_name="short_viral.mp4",
-                    mime="video/mp4"
-                )
-        else:
-            st.error(f"Erreur lors de la création de la vidéo : {err}")
+                    final_video, err = create_video_ffmpeg(images, audio_file, ass_file, "short_final.mp4", is_short=True)
+
+                    if final_video and os.path.exists(final_video):
+                        st.success("✅ Short généré avec succès !")
+                        st.video(final_video)
+                        with open(final_video, "rb") as f:
+                            st.download_button("📥 Télécharger le Short (MP4)", data=f, file_name="short_youtube.mp4", mime="video/mp4")
+                    else:
+                        st.error(f"Erreur rendu : {err}")
+
+# ----------------- ONGLET 2 : VIDÉO LONGUE -----------------
+with tab_long:
+    st.header("Format Horizontal (16:9)")
+    st.caption("Optimisé pour les vidéos YouTube explicatives plus complètes (2-3 minutes).")
+
+    subject_long = st.text_input("Sujet de la vidéo longue (optionnel) :", placeholder="Ex: Comment fonctionne la mémoire humaine ?", key="long_subject")
+
+    if st.button("🚀 Générer la Vidéo Longue", key="btn_long"):
+        with st.spinner("Génération de la vidéo longue en cours..."):
+            script, err = generate_script(subject_long if subject_long else None, mode="long")
+            if err:
+                st.error(err)
+            else:
+                st.subheader("📝 Script Détaillé Généré")
+                st.info(script)
+
+                narration_text, memes = parse_script(script)
+                audio_file, err = generate_audio(narration_text, "long_voice.mp3")
+                
+                if err:
+                    st.error(err)
+                else:
+                    ass_file = generate_ass_subtitles(narration_text, "long_subs.ass", is_short=False)
+                    temp_dir = tempfile.mkdtemp()
+                    images = fetch_placeholder_images(temp_dir, count=8, is_short=False)
+
+                    final_video, err = create_video_ffmpeg(images, audio_file, ass_file, "long_final.mp4", is_short=False)
+
+                    if final_video and os.path.exists(final_video):
+                        st.success("✅ Vidéo longue générée avec succès !")
+                        st.video(final_video)
+                        with open(final_video, "rb") as f:
+                            st.download_button("📥 Télécharger la Vidéo Longue (MP4)", data=f, file_name="video_youtube_longue.mp4", mime="video/mp4")
+                    else:
+                        st.error(f"Erreur rendu : {err}")
