@@ -49,7 +49,7 @@ STYLE ET TON:
 - Dynamique, percutant, énergique avec un tutoiement direct.
 - Accroches modernes ("Attends...", "Regarde ça...", "C'est complètement fou").
 - Humour intelligent et situationnel.
-- BOUCLE PARFAITE : La dernière phrase du CTA doit s'enchaîner avec la première du HOOK.
+- BOUCLE PARFAITE : La dernière phrase du CTA doit s'enchaîner naturellement avec la première du HOOK.
 
 RÈGLES ÉTHIQUES STRICTES:
 - ZÉRO vulgarité, zéro insulte.
@@ -258,7 +258,7 @@ def create_video_ffmpeg(images, audio_path, ass_subtitles_path, output_path="vid
             map_video_label = '[v_zoom]'
 
         cmd.extend([
-            '-vf', filter_complex,
+            '-filter_complex', filter_complex,
             '-map', map_video_label
         ])
 
@@ -277,7 +277,7 @@ def create_video_ffmpeg(images, audio_path, ass_subtitles_path, output_path="vid
         if result.returncode == 0 and os.path.exists(output_path):
             return output_path, None
         else:
-            return None, f"❌ Erreur FFmpeg: {result.stderr[-300:]}"
+            return None, f"❌ Erreur FFmpeg: {result.stderr[-400:]}"
             
     except Exception as e:
         return None, f"❌ Erreur exécution FFmpeg: {str(e)}"
