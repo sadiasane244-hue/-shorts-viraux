@@ -9,7 +9,7 @@ import asyncio
 import urllib.parse
 import concurrent.futures
 import requests
-from PIL import Image, ImageDraw
+from PIL import Image
 import streamlit as st
 
 # ---------------------------------------------------------
@@ -26,11 +26,11 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct"
 
 # ---------------------------------------------------------
-# GENERATION DE SCRIPT AVEC PROMPTS D'IMAGES & MÈMES
+# GENERATION DE SCRIPTS (SHORT TEASER & VIDÉO LONGUE)
 # ---------------------------------------------------------
-def generate_script(subject=None, mode="short"):
+def generate_pack_scripts(subject=None):
     if not OPENROUTER_API_KEY:
-        return None, "❌ Clé OpenRouter manquante dans les variables d'environnement."
+        return None, None, "❌ Clé OpenRouter manquante."
 
     topics = [
         "pourquoi ton cerveau te fait procrastiner au pire moment",
@@ -43,34 +43,8 @@ def generate_script(subject=None, mode="short"):
     if not subject:
         subject = random.choice(topics)
 
-    if mode == "short":
-        system_prompt = """Tu es un créateur de contenu viral pour TikTok et YouTube Shorts.
-Tu écris des scripts HYPER CAPTIVANTS (30-45s), modernes et amusants sur la psychologie et le cerveau.
-
-STYLE ET TON:
-- Dynamique, percutant, énergique avec un tutoiement direct.
-- Accroches modernes ("Attends...", "Regarde ça...", "C'est complètement fou").
-- Humour intelligent et situationnel.
-- BOUCLE PARFAITE : La dernière phrase du CTA doit s'enchaîner naturellement avec la première du HOOK.
-
-RÈGLES ÉTHIQUES STRICTES:
-- ZÉRO vulgarité, zéro insulte.
-- NE PARLE JAMAIS de "Mère Nature" ni d'évolution. Utilise : "Le cerveau humain", "Notre biologie".
-- Zéro mention de musique, zéro mention de religion.
-
-FORMAT STRICT (Inclus pour chaque étape une balise [IMAGE: description visuelle en anglais] ou [MEME: description de mème en anglais]) :
-TITRE: [titre court]
-HOOK: [Phrase d'accroche choc] [IMAGE: detailed visual concept in English, cinematic photorealistic]
-MEME 1: [MEME: funny reaction meme description in English]
-FAIT 1: [Premier fait scientifique avec **mots-clés** en gras] [IMAGE: science concept visual in English, cinematic]
-MEME 2: [MEME: funny shocked reaction meme description in English]
-FAIT 2: [Deuxième fait scientifique avec **mots-clés** en gras] [IMAGE: human biology concept visual in English, cinematic]
-MEME 3: [MEME: funny thinking reaction meme description in English]
-FAIT 3: [Troisième fait scientifique avec **mots-clés** en gras] [IMAGE: brain psychology visual in English, cinematic]
-CTA: [Call to action court posant une question engageante] [IMAGE: engaging question visual background in English]
-HASHTAGS: [5 hashtags viraux]"""
-    else:
-        system_prompt = """Tu es un vulgarisateur scientifique pour des vidéos longues YouTube (16:9).
+    # 1. Script Vidéo Longue
+    long_system_prompt = """Tu es un vulgarisateur scientifique pour des vidéos longues YouTube (16:9).
 Tu écris des scripts structurés, captivants, pédagogiques et amusants (durée 2 à 3 minutes).
 
 STYLE ET TON:
@@ -88,7 +62,21 @@ CONCLUSION: [Résumé rapide] [IMAGE: detailed concept visual in English]
 CTA: [Invitation à s'abonner] [IMAGE: YouTube subscribe visual background in English]
 HASHTAGS: [5 hashtags YouTube]"""
 
-    user_prompt = f"Crée un script ({mode}) moderne, fun et instructif sur : {subject}"
+    # 2. Script Short Teaser
+    teaser_system_prompt = f"""Tu es un créateur de contenu viral TikTok / YouTube Shorts (9:16).
+Ton but est de créer un SHORT TEASER hyper dynamique (20-30 secondes) pour donner ENVIE de regarder la vidéo longue complète sur : "{subject}".
+
+STYLE ET TON:
+- Très court, intrigant, mystérieux et percutant.
+- Tu révèles juste assez d'informations pour susciter la curiosité, sans tout dévoiler.
+- LE CTA DOIT EXPLICITEMENT DIRE DE RENTER SUR LA CHAÎNE POUR VOIR LA VIDÉO COMPLÈTE.
+
+FORMAT STRICT (Inclus des balises [IMAGE: ...] et [MEME: ...]) :
+TITRE: [Titre court du teaser]
+HOOK: [Accroche mystérieuse et choc] [IMAGE: mysterious psychology brain concept visual in English]
+TEASER: [Extrait captivant ou question intrigante] [MEME: shocked reaction meme visual in English]
+CTA: [Découvre la suite et l'explication complète dans la vidéo longue sur la chaîne !] [IMAGE: click full video CTA visual in English]
+HASHTAGS: [5 hashtags viraux]"""
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -97,27 +85,23 @@ HASHTAGS: [5 hashtags YouTube]"""
         "X-Title": "Video Generator"
     }
 
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "temperature": 0.85,
-        "max_tokens": 1500 if mode == "long" else 800
-    }
-
     try:
-        response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=40)
-        if response.status_code == 200:
-            data = response.json()
-            if 'choices' in data and len(data['choices']) > 0:
-                return data['choices'][0]['message']['content'], None
-            return None, "❌ Réponse vide d'OpenRouter."
-        else:
-            return None, f"❌ Erreur {response.status_code}: {response.text[:200]}"
+        # Requête pour la vidéo longue
+        p_long = {"model": OPENROUTER_MODEL, "messages": [{"role": "system", "content": long_system_prompt}, {"role": "user", "content": f"Script long sur : {subject}"}], "temperature": 0.85, "max_tokens": 1500}
+        r_long = requests.post(OPENROUTER_URL, headers=headers, json=p_long, timeout=40)
+        script_long = r_long.json()['choices'][0]['message']['content'] if r_long.status_code == 200 else None
+
+        # Requête pour le teaser
+        p_teaser = {"model": OPENROUTER_MODEL, "messages": [{"role": "system", "content": teaser_system_prompt}, {"role": "user", "content": f"Teaser court sur : {subject}"}], "temperature": 0.85, "max_tokens": 600}
+        r_teaser = requests.post(OPENROUTER_URL, headers=headers, json=p_teaser, timeout=40)
+        script_teaser = r_teaser.json()['choices'][0]['message']['content'] if r_teaser.status_code == 200 else None
+
+        if script_long and script_teaser:
+            return script_long, script_teaser, None
+        return None, None, "❌ Erreur lors de la génération des scripts."
+
     except Exception as e:
-        return None, f"❌ Erreur connexion: {str(e)}"
+        return None, None, f"❌ Erreur connexion: {str(e)}"
 
 # ---------------------------------------------------------
 # NETTOYAGE DU SCRIPT ET EXTRACTION DES PROMPTS VISUELS
@@ -131,23 +115,16 @@ def parse_script(script_text):
         if not line:
             continue
             
-        # Extraction des descriptions d'images et de mèmes
         visual_matches = re.findall(r'\[(?:IMAGE|MEME|MÈME|Meme|Mème)\s*:\s*(.*?)\]', line, re.IGNORECASE)
         for v in visual_matches:
             if v.strip():
                 visual_prompts.append(v.strip())
 
-        # 1. Ignorer totalement les lignes de Titre et d'Hashtags
         if re.match(r'^(TITRE|HASHTAGS|HASHTAG)\s*:', line, re.IGNORECASE):
             continue
 
-        # 2. Supprimer tout le contenu entre crochets
         cleaned = re.sub(r'\[.*?\]', '', line)
-
-        # 3. Supprimer les balises de structure (HOOK:, FAIT 1:, MEME 1:, INTRO:, CTA:, etc.)
-        cleaned = re.sub(r'^(HOOK|INTRO|PARTIE\s*\d+|FAIT\s*\d+|MEME\s*\d+|CONCLUSION|CTA)\s*:\s*', '', cleaned, flags=re.IGNORECASE)
-
-        # 4. Supprimer le formatage Markdown
+        cleaned = re.sub(r'^(HOOK|INTRO|PARTIE\s*\d+|FAIT\s*\d+|MEME\s*\d+|TEASER|CONCLUSION|CTA)\s*:\s*', '', cleaned, flags=re.IGNORECASE)
         cleaned = cleaned.replace('*', '').strip()
 
         if cleaned:
@@ -175,8 +152,9 @@ def fetch_single_image(prompt, idx, temp_dir, is_short=True):
     except Exception:
         pass
         
-    # Image de secours si problème réseau
-    img = Image.new('RGB', (width, height), color=(20, 30, 50 if idx % 2 == 0 else 40, 20, 60))
+    # Correction du tuple de couleur pour éviter le crash TypeError
+    fallback_color = (20, 30, 50) if idx % 2 == 0 else (40, 20, 60)
+    img = Image.new('RGB', (width, height), color=fallback_color)
     img.save(img_path)
     return img_path
 
@@ -186,9 +164,7 @@ def fetch_all_images(prompts, temp_dir, is_short=True):
             "human brain thinking psychology cinematic",
             "funny reaction meme shocked face",
             "nervous system stress illustration",
-            "funny thinking face meme",
-            "brain wave memory concept cinematic",
-            "neon question mark call to action"
+            "brain wave memory concept cinematic"
         ]
         
     images = []
@@ -354,88 +330,67 @@ def create_video_ffmpeg(images, audio_path, ass_subtitles_path, output_path="vid
 # ---------------------------------------------------------
 # INTERFACE UTILISATEUR STREAMLIT
 # ---------------------------------------------------------
-st.title("🎬 Studio de Création Vidéo IA")
+st.title("🎬 Studio Vidéo IA - Pack Duo (Teaser + Long)")
 
-tab_short, tab_long = st.tabs(["📱 Short Court (YouTube Shorts / TikTok)", "🎥 Vidéo Longue (YouTube 16:9)"])
+subject_input = st.text_input("Sujet principal de la vidéo :", placeholder="Ex: Pourquoi le cerveau procrastine ?", key="subject_main")
 
-# ----------------- ONGLET 1 : SHORT COURT -----------------
-with tab_short:
-    st.header("Format Vertical (9:16)")
-    st.caption("Optimisé pour YouTube Shorts, TikTok et Reels avec images IA, mèmes et sous-titres dynamiques.")
+if st.button("🚀 Générer le Pack Duo (Vidéo Longue + Short Teaser)", key="btn_pack"):
+    if not subject_input:
+        st.warning("Veuillez saisir un sujet de vidéo.")
+    else:
+        st.info("⚡ Génération du Pack Duo en cours...")
+        
+        # 1. Génération des deux scripts
+        with st.spinner("1/5 Rédaction des scripts (Longue + Teaser)..."):
+            script_long, script_teaser, err = generate_pack_scripts(subject_input)
+            
+        if err:
+            st.error(err)
+        else:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.subheader("🎥 Script Vidéo Longue")
+                st.text_area("Long", script_long, height=200)
+            with col_b:
+                st.subheader("📱 Script Short Teaser")
+                st.text_area("Teaser", script_teaser, height=200)
 
-    subject_short = st.text_input("Sujet du Short (optionnel) :", placeholder="Ex: Pourquoi le cerveau procrastine ?", key="short_subject")
+            # 2. Génération de la Vidéo Longue
+            st.markdown("---")
+            st.subheader("🎥 1. Production de la Vidéo Longue (16:9)")
+            
+            narration_long, prompts_long = parse_script(script_long)
+            audio_long, err1 = generate_audio(narration_long, "long_voice.mp3")
+            ass_long = generate_ass_subtitles(narration_long, "long_subs.ass", is_short=False)
+            
+            temp_dir_long = tempfile.mkdtemp()
+            images_long = fetch_all_images(prompts_long, temp_dir_long, is_short=False)
+            video_long, err2 = create_video_ffmpeg(images_long, audio_long, ass_long, "long_final.mp4", is_short=False)
 
-    if st.button("🚀 Générer le Short Court", key="btn_short"):
-        with st.spinner("1/4 Génération du script..."):
-            script, err = generate_script(subject_short if subject_short else None, mode="short")
-            if err:
-                st.error(err)
+            if video_long and os.path.exists(video_long):
+                st.success("✅ Vidéo Longue prête !")
+                st.video(video_long)
+                with open(video_long, "rb") as f:
+                    st.download_button("📥 Télécharger Vidéo Longue (MP4)", data=f, file_name="video_longue.mp4", mime="video/mp4")
             else:
-                st.subheader("📝 Script Généré")
-                st.info(script)
+                st.error(f"Erreur vidéo longue: {err2}")
 
-                narration_text, visual_prompts = parse_script(script)
-                
-                with st.spinner("2/4 Génération de la voix off..."):
-                    audio_file, err = generate_audio(narration_text, "short_voice.mp3")
-                
-                if err:
-                    st.error(err)
-                else:
-                    ass_file = generate_ass_subtitles(narration_text, "short_subs.ass", is_short=True)
-                    temp_dir = tempfile.mkdtemp()
-                    
-                    with st.spinner("3/4 Génération des images et mèmes IA..."):
-                        images = fetch_all_images(visual_prompts, temp_dir, is_short=True)
+            # 3. Génération du Short Teaser
+            st.markdown("---")
+            st.subheader("📱 2. Production du Short Teaser (9:16)")
+            
+            narration_teaser, prompts_teaser = parse_script(script_teaser)
+            audio_teaser, err3 = generate_audio(narration_teaser, "teaser_voice.mp3")
+            ass_teaser = generate_ass_subtitles(narration_teaser, "teaser_subs.ass", is_short=True)
+            
+            temp_dir_teaser = tempfile.mkdtemp()
+            images_teaser = fetch_all_images(prompts_teaser, temp_dir_teaser, is_short=True)
+            video_teaser, err4 = create_video_ffmpeg(images_teaser, audio_teaser, ass_teaser, "teaser_final.mp4", is_short=True)
 
-                    with st.spinner("4/4 Montage vidéo FFmpeg en cours..."):
-                        final_video, err = create_video_ffmpeg(images, audio_file, ass_file, "short_final.mp4", is_short=True)
-
-                    if final_video and os.path.exists(final_video):
-                        st.success("✅ Short généré avec succès !")
-                        st.video(final_video)
-                        with open(final_video, "rb") as f:
-                            st.download_button("📥 Télécharger le Short (MP4)", data=f, file_name="short_youtube.mp4", mime="video/mp4")
-                    else:
-                        st.error(f"Erreur rendu : {err}")
-
-# ----------------- ONGLET 2 : VIDÉO LONGUE -----------------
-with tab_long:
-    st.header("Format Horizontal (16:9)")
-    st.caption("Optimisé pour les vidéos YouTube explicatives plus complètes (2-3 minutes).")
-
-    subject_long = st.text_input("Sujet de la vidéo longue (optionnel) :", placeholder="Ex: Comment fonctionne la mémoire humaine ?", key="long_subject")
-
-    if st.button("🚀 Générer la Vidéo Longue", key="btn_long"):
-        with st.spinner("1/4 Génération du script détaillé..."):
-            script, err = generate_script(subject_long if subject_long else None, mode="long")
-            if err:
-                st.error(err)
+            if video_teaser and os.path.exists(video_teaser):
+                st.success("✅ Short Teaser prêt !")
+                st.video(video_teaser)
+                with open(video_teaser, "rb") as f:
+                    st.download_button("📥 Télécharger Short Teaser (MP4)", data=f, file_name="short_teaser.mp4", mime="video/mp4")
             else:
-                st.subheader("📝 Script Détaillé Généré")
-                st.info(script)
-
-                narration_text, visual_prompts = parse_script(script)
-                
-                with st.spinner("2/4 Génération de la voix off..."):
-                    audio_file, err = generate_audio(narration_text, "long_voice.mp3")
-                
-                if err:
-                    st.error(err)
-                else:
-                    ass_file = generate_ass_subtitles(narration_text, "long_subs.ass", is_short=False)
-                    temp_dir = tempfile.mkdtemp()
-                    
-                    with st.spinner("3/4 Génération des illustrations par l'IA..."):
-                        images = fetch_all_images(visual_prompts, temp_dir, is_short=False)
-
-                    with st.spinner("4/4 Montage vidéo FFmpeg en cours..."):
-                        final_video, err = create_video_ffmpeg(images, audio_file, ass_file, "long_final.mp4", is_short=False)
-
-                    if final_video and os.path.exists(final_video):
-                        st.success("✅ Vidéo longue générée avec succès !")
-                        st.video(final_video)
-                        with open(final_video, "rb") as f:
-                            st.download_button("📥 Télécharger la Vidéo Longue (MP4)", data=f, file_name="video_youtube_longue.mp4", mime="video/mp4")
-                    else:
-                        st.error(f"Erreur rendu : {err}")
+                st.error(f"Erreur short teaser: {err4}")
