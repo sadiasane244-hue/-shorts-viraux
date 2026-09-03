@@ -975,4 +975,3 @@ if st.button("🚀 Générer le Pack Duo", key="btn_pack", type="primary"):
         status.error("La génération a été arrêtée pour éviter de produire un fichier défectueux.")
         st.error(str(exc))
         st.caption(f"Dossier de travail: {work_dir}")
-
