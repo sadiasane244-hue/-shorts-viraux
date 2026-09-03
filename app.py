@@ -43,39 +43,44 @@ def generate_pack_scripts(subject=None):
     if not subject:
         subject = random.choice(topics)
 
-    # 1. Script Vidéo Longue
+    # 1. Script Vidéo Longue (Objectif: ~2 à 3 minutes -> 600 à 800 mots)
     long_system_prompt = """Tu es un vulgarisateur scientifique pour des vidéos longues YouTube (16:9).
-Tu écris des scripts structurés, captivants, pédagogiques et amusants (durée 2 à 3 minutes).
+Ton but est de faire une vidéo DÉTAILLÉE ET LONGUE. Le script DOIT faire entre 600 et 800 mots.
+Détaille les explications, donne plusieurs exemples, prends le temps de développer.
 
 STYLE ET TON:
-- Professionnel mais accessible, engageant avec tutoiement direct.
-- Explications claires, exemples concrets de la vie quotidienne.
-- ZÉRO vulgarité, zéro mention de "Mère Nature" ou théorie de l'évolution.
+- Professionnel, captivant, engageant. Tutoiement direct.
+- ZÉRO vulgarité, zéro mention de "Mère Nature".
 
-FORMAT STRICT (Inclus pour chaque section une balise [IMAGE: description visuelle en anglais]) :
+FORMAT STRICT:
+Insère UNE BALISE [IMAGE: description visuelle très détaillée en anglais] TOUTES LES 2 PHRASES. C'est crucial pour le montage vidéo. Plus il y a d'images, mieux c'est (vise au moins 20 balises IMAGE).
+
 TITRE: [Titre accrocheur YouTube]
-INTRO: [Introduction captivante] [IMAGE: detailed concept visual in English]
-PARTIE 1: [Titre et explications premier concept] [IMAGE: detailed concept visual in English]
-PARTIE 2: [Titre et explications deuxième concept] [IMAGE: detailed concept visual in English]
-PARTIE 3: [Titre et explications troisième concept] [IMAGE: detailed concept visual in English]
-CONCLUSION: [Résumé rapide] [IMAGE: detailed concept visual in English]
-CTA: [Invitation à s'abonner] [IMAGE: YouTube subscribe visual background in English]
-HASHTAGS: [5 hashtags YouTube]"""
+INTRO: [Introduction longue qui pose le contexte] [IMAGE: ...]
+PARTIE 1: [Explications approfondies] [IMAGE: ...] ... [IMAGE: ...]
+PARTIE 2: [Explications approfondies] [IMAGE: ...] ... [IMAGE: ...]
+PARTIE 3: [Explications approfondies] [IMAGE: ...] ... [IMAGE: ...]
+CONCLUSION: [Résumé et morale] [IMAGE: ...]
+CTA: [Abonne-toi pour ne rien rater] [IMAGE: YouTube subscribe background]
+HASHTAGS: [5 hashtags]"""
 
-    # 2. Script Short Teaser
+    # 2. Script Short Teaser (Objectif: 45 à 60 secondes -> 130 à 160 mots)
     teaser_system_prompt = f"""Tu es un créateur de contenu viral TikTok / YouTube Shorts (9:16).
-Ton but est de créer un SHORT TEASER hyper dynamique (20-30 secondes) pour donner ENVIE de regarder la vidéo longue complète sur : "{subject}".
+Ton but est de créer un SHORT TEASER hyper dynamique (45 à 60 secondes). Le script DOIT faire entre 130 et 160 mots maximum.
+Tu dois donner ENVIE d'aller voir la vidéo longue complète sur la chaîne, sur le sujet : "{subject}".
 
 STYLE ET TON:
-- Très court, intrigant, mystérieux et percutant.
-- Tu révèles juste assez d'informations pour susciter la curiosité, sans tout dévoiler.
-- LE CTA DOIT EXPLICITEMENT DIRE DE RENTER SUR LA CHAÎNE POUR VOIR LA VIDÉO COMPLÈTE.
+- Très rythmé, intrigant, mystérieux.
+- Pose le problème, donne un début de réponse, mais garde le grand secret pour la vidéo longue.
+- LE CTA FINAL DOIT EXPLICITEMENT DIRE D'ALLER SUR LA CHAÎNE POUR LA VIDÉO COMPLÈTE.
 
-FORMAT STRICT (Inclus des balises [IMAGE: ...] et [MEME: ...]) :
+FORMAT STRICT:
+Insère UNE BALISE [IMAGE: description en anglais] ou [MEME: description en anglais] À CHAQUE PHRASE pour un rythme ultra-rapide (vise au moins 10 balises).
+
 TITRE: [Titre court du teaser]
-HOOK: [Accroche mystérieuse et choc] [IMAGE: mysterious psychology brain concept visual in English]
-TEASER: [Extrait captivant ou question intrigante] [MEME: shocked reaction meme visual in English]
-CTA: [Découvre la suite et l'explication complète dans la vidéo longue sur la chaîne !] [IMAGE: click full video CTA visual in English]
+HOOK: [Accroche mystérieuse] [IMAGE: ...]
+TEASER: [Développement rapide et captivant] [MEME: ...] [IMAGE: ...]
+CTA: [Va voir la vidéo complète sur ma chaîne pour tout comprendre !] [IMAGE: click full video CTA]
 HASHTAGS: [5 hashtags viraux]"""
 
     headers = {
@@ -86,13 +91,13 @@ HASHTAGS: [5 hashtags viraux]"""
     }
 
     try:
-        # Requête pour la vidéo longue
-        p_long = {"model": OPENROUTER_MODEL, "messages": [{"role": "system", "content": long_system_prompt}, {"role": "user", "content": f"Script long sur : {subject}"}], "temperature": 0.85, "max_tokens": 1500}
-        r_long = requests.post(OPENROUTER_URL, headers=headers, json=p_long, timeout=40)
+        # Requête pour la vidéo longue (Max tokens augmenté)
+        p_long = {"model": OPENROUTER_MODEL, "messages": [{"role": "system", "content": long_system_prompt}, {"role": "user", "content": f"Rédige le script LONG sur : {subject}"}], "temperature": 0.85, "max_tokens": 2500}
+        r_long = requests.post(OPENROUTER_URL, headers=headers, json=p_long, timeout=60)
         script_long = r_long.json()['choices'][0]['message']['content'] if r_long.status_code == 200 else None
 
         # Requête pour le teaser
-        p_teaser = {"model": OPENROUTER_MODEL, "messages": [{"role": "system", "content": teaser_system_prompt}, {"role": "user", "content": f"Teaser court sur : {subject}"}], "temperature": 0.85, "max_tokens": 600}
+        p_teaser = {"model": OPENROUTER_MODEL, "messages": [{"role": "system", "content": teaser_system_prompt}, {"role": "user", "content": f"Rédige le TEASER COURT sur : {subject}"}], "temperature": 0.85, "max_tokens": 800}
         r_teaser = requests.post(OPENROUTER_URL, headers=headers, json=p_teaser, timeout=40)
         script_teaser = r_teaser.json()['choices'][0]['message']['content'] if r_teaser.status_code == 200 else None
 
@@ -115,7 +120,8 @@ def parse_script(script_text):
         if not line:
             continue
             
-        visual_matches = re.findall(r'\[(?:IMAGE|MEME|MÈME|Meme|Mème)\s*:\s*(.*?)\]', line, re.IGNORECASE)
+        # Extraction plus tolérante des images/mèmes
+        visual_matches = re.findall(r'\[(?:IMAGE|MEME|MÈME|Meme|Mème|VISUEL)\s*[:\-]?\s*(.*?)\]', line, re.IGNORECASE)
         for v in visual_matches:
             if v.strip():
                 visual_prompts.append(v.strip())
@@ -134,25 +140,28 @@ def parse_script(script_text):
     return narration_text, visual_prompts
 
 # ---------------------------------------------------------
-# GENERATION DES IMAGES ET MÈMES PAR IA (Pollinations.ai)
+# GENERATION DES IMAGES PAR IA (Haute Qualité - Modèle Flux)
 # ---------------------------------------------------------
 def fetch_single_image(prompt, idx, temp_dir, is_short=True):
     width, height = (1080, 1920) if is_short else (1920, 1080)
     img_path = os.path.join(temp_dir, f"scene_{idx}.jpg")
     
-    encoded_prompt = urllib.parse.quote(f"{prompt}, high quality, 8k, cinematic lighting")
-    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&nologo=true"
+    # Amélioration du prompt pour forcer le photoréalisme et la haute définition
+    enhanced_prompt = f"{prompt}, highly detailed, 4k resolution, cinematic lighting, photorealistic, no text"
+    encoded_prompt = urllib.parse.quote(enhanced_prompt)
+    
+    # Utilisation du modèle 'flux' de Pollinations (bien meilleur que le défaut)
+    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&nologo=true&model=flux"
     
     try:
-        resp = requests.get(url, timeout=20)
-        if resp.status_code == 200 and len(resp.content) > 1000:
+        resp = requests.get(url, timeout=25)
+        if resp.status_code == 200 and len(resp.content) > 10000: # Vérification taille pour éviter les fausses images
             with open(img_path, "wb") as f:
                 f.write(resp.content)
             return img_path
     except Exception:
         pass
         
-    # Correction du tuple de couleur pour éviter le crash TypeError
     fallback_color = (20, 30, 50) if idx % 2 == 0 else (40, 20, 60)
     img = Image.new('RGB', (width, height), color=fallback_color)
     img.save(img_path)
@@ -160,12 +169,7 @@ def fetch_single_image(prompt, idx, temp_dir, is_short=True):
 
 def fetch_all_images(prompts, temp_dir, is_short=True):
     if not prompts:
-        prompts = [
-            "human brain thinking psychology cinematic",
-            "funny reaction meme shocked face",
-            "nervous system stress illustration",
-            "brain wave memory concept cinematic"
-        ]
+        prompts = ["human brain thinking cinematic", "shocked face meme", "nervous system", "youtube subscribe button"]
         
     images = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -178,17 +182,20 @@ def fetch_all_images(prompts, temp_dir, is_short=True):
     return images
 
 # ---------------------------------------------------------
-# GENERATION AUDIO (Edge-TTS)
+# GENERATION AUDIO (Plus dynamique)
 # ---------------------------------------------------------
-async def generate_audio_async(text, output_mp3):
+async def generate_audio_async(text, output_mp3, is_short=True):
     import edge_tts
-    voice = "fr-FR-HenriNeural"
-    communicate = edge_tts.Communicate(text, voice, rate="+5%")
+    # Remy est une voix masculine plus jeune et dynamique. 
+    voice = "fr-FR-RemyNeural" 
+    # Rythme plus rapide pour le teaser TikTok, rythme posé pour la vidéo longue
+    rate = "+10%" if is_short else "+2%"
+    communicate = edge_tts.Communicate(text, voice, rate=rate)
     await communicate.save(output_mp3)
 
-def generate_audio(text, output_mp3="narration.mp3"):
+def generate_audio(text, output_mp3="narration.mp3", is_short=True):
     try:
-        asyncio.run(generate_audio_async(text, output_mp3))
+        asyncio.run(generate_audio_async(text, output_mp3, is_short))
         if os.path.exists(output_mp3):
             return output_mp3, None
         return None, "❌ Erreur génération fichier audio."
@@ -232,7 +239,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     words = text.split()
     chunk_size = 3 if is_short else 6
     current_time = 0.0
-    word_duration = 0.35
+    # On ajuste la durée théorique par mot selon la vitesse
+    word_duration = 0.32 if is_short else 0.35
 
     with open(output_ass, "w", encoding="utf-8") as f:
         f.write(header)
@@ -256,25 +264,31 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return output_ass
 
 # ---------------------------------------------------------
-# ASSEMBLAGE VIDÉO FFMPEG DIRECT
+# ASSEMBLAGE VIDÉO FFMPEG DIRECT (Montage Dynamique)
 # ---------------------------------------------------------
 def create_video_ffmpeg(images, audio_path, ass_subtitles_path, output_path="video_output.mp4", is_short=True):
     try:
         temp_dir = tempfile.mkdtemp()
-        
         audio_duration = get_audio_duration(audio_path) if audio_path and os.path.exists(audio_path) else 30.0
-        num_images = max(len(images), 1)
-        segment_duration = max(1.5, audio_duration / num_images)
+        
+        # SÉCURITÉ : Forcer un changement d'image toutes les 3.5 secondes max
+        target_image_duration = 3.5
+        required_images = max(1, int(audio_duration / target_image_duration)) + 1
+        
+        # Si l'IA n'a pas généré assez d'images, on boucle sur la liste pour dynamiser le visuel
+        final_images = []
+        for i in range(required_images):
+            final_images.append(images[i % len(images)])
+
+        segment_duration = audio_duration / len(final_images)
 
         concat_file = os.path.join(temp_dir, "input.txt")
-
         with open(concat_file, 'w', encoding='utf-8') as f:
-            for img_p in images:
+            for img_p in final_images:
                 clean_img = img_p.replace("\\", "/")
                 f.write(f"file '{clean_img}'\n")
                 f.write(f"duration {segment_duration:.2f}\n")
-            clean_last_img = images[-1].replace("\\", "/")
-            f.write(f"file '{clean_last_img}'\n")
+            f.write(f"file '{final_images[-1].replace('\\', '/')}'\n")
 
         cmd = [
             'ffmpeg', '-y',
@@ -284,6 +298,7 @@ def create_video_ffmpeg(images, audio_path, ass_subtitles_path, output_path="vid
         if audio_path and os.path.exists(audio_path):
             cmd.extend(['-i', audio_path])
 
+        # Effet Ken Burns (Zoom lent) pour donner vie aux images
         if is_short:
             filter_complex = (
                 "[0:v]scale=1280:2275,zoompan=z='min(zoom+0.0015,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=125:s=1080x1920:fps=25,"
@@ -338,10 +353,9 @@ if st.button("🚀 Générer le Pack Duo (Vidéo Longue + Short Teaser)", key="b
     if not subject_input:
         st.warning("Veuillez saisir un sujet de vidéo.")
     else:
-        st.info("⚡ Génération du Pack Duo en cours...")
+        st.info("⚡ Génération du Pack Duo en cours... (Cela peut prendre 2 à 3 minutes)")
         
-        # 1. Génération des deux scripts
-        with st.spinner("1/5 Rédaction des scripts (Longue + Teaser)..."):
+        with st.spinner("1/5 Rédaction des scripts avec IA..."):
             script_long, script_teaser, err = generate_pack_scripts(subject_input)
             
         if err:
@@ -355,40 +369,46 @@ if st.button("🚀 Générer le Pack Duo (Vidéo Longue + Short Teaser)", key="b
                 st.subheader("📱 Script Short Teaser")
                 st.text_area("Teaser", script_teaser, height=200)
 
-            # 2. Génération de la Vidéo Longue
+            # --- VIDEO LONGUE ---
             st.markdown("---")
             st.subheader("🎥 1. Production de la Vidéo Longue (16:9)")
             
             narration_long, prompts_long = parse_script(script_long)
-            audio_long, err1 = generate_audio(narration_long, "long_voice.mp3")
+            audio_long, err1 = generate_audio(narration_long, "long_voice.mp3", is_short=False)
             ass_long = generate_ass_subtitles(narration_long, "long_subs.ass", is_short=False)
             
             temp_dir_long = tempfile.mkdtemp()
-            images_long = fetch_all_images(prompts_long, temp_dir_long, is_short=False)
-            video_long, err2 = create_video_ffmpeg(images_long, audio_long, ass_long, "long_final.mp4", is_short=False)
+            with st.spinner("Génération des images HD pour la vidéo longue..."):
+                images_long = fetch_all_images(prompts_long, temp_dir_long, is_short=False)
+                
+            with st.spinner("Montage et synchronisation FFmpeg..."):
+                video_long, err2 = create_video_ffmpeg(images_long, audio_long, ass_long, "long_final.mp4", is_short=False)
 
             if video_long and os.path.exists(video_long):
-                st.success("✅ Vidéo Longue prête !")
+                st.success(f"✅ Vidéo Longue prête ! (Durée: {get_audio_duration(audio_long):.1f} sec)")
                 st.video(video_long)
                 with open(video_long, "rb") as f:
                     st.download_button("📥 Télécharger Vidéo Longue (MP4)", data=f, file_name="video_longue.mp4", mime="video/mp4")
             else:
                 st.error(f"Erreur vidéo longue: {err2}")
 
-            # 3. Génération du Short Teaser
+            # --- SHORT TEASER ---
             st.markdown("---")
             st.subheader("📱 2. Production du Short Teaser (9:16)")
             
             narration_teaser, prompts_teaser = parse_script(script_teaser)
-            audio_teaser, err3 = generate_audio(narration_teaser, "teaser_voice.mp3")
+            audio_teaser, err3 = generate_audio(narration_teaser, "teaser_voice.mp3", is_short=True)
             ass_teaser = generate_ass_subtitles(narration_teaser, "teaser_subs.ass", is_short=True)
             
             temp_dir_teaser = tempfile.mkdtemp()
-            images_teaser = fetch_all_images(prompts_teaser, temp_dir_teaser, is_short=True)
-            video_teaser, err4 = create_video_ffmpeg(images_teaser, audio_teaser, ass_teaser, "teaser_final.mp4", is_short=True)
+            with st.spinner("Génération des images HD pour le teaser..."):
+                images_teaser = fetch_all_images(prompts_teaser, temp_dir_teaser, is_short=True)
+                
+            with st.spinner("Montage et synchronisation FFmpeg..."):
+                video_teaser, err4 = create_video_ffmpeg(images_teaser, audio_teaser, ass_teaser, "teaser_final.mp4", is_short=True)
 
             if video_teaser and os.path.exists(video_teaser):
-                st.success("✅ Short Teaser prêt !")
+                st.success(f"✅ Short Teaser prêt ! (Durée: {get_audio_duration(audio_teaser):.1f} sec)")
                 st.video(video_teaser)
                 with open(video_teaser, "rb") as f:
                     st.download_button("📥 Télécharger Short Teaser (MP4)", data=f, file_name="short_teaser.mp4", mime="video/mp4")
