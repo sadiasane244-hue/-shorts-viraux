@@ -1,12 +1,11 @@
 import os
+import json
 import random
 import re
 import subprocess
 import tempfile
-import asyncio
 import concurrent.futures
 import time
-
 from pathlib import Path
 
 import requests
@@ -30,16 +29,30 @@ PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct"
 
-VOICE = "fr-FR-RemyNeural"
+# Voix préférées.
+# Le système essaiera automatiquement la suivante si la précédente échoue.
+PREFERRED_VOICES = [
+    "fr-FR-HenriNeural",
+    "fr-FR-DeniseNeural",
+    "fr-FR-EloiseNeural",
+    "fr-FR-RemyMultilingualNeural",
+    "fr-FR-VivienneMultilingualNeural",
+]
 
 REQUEST_TIMEOUT = 90
 PEXELS_TIMEOUT = 20
-
 MAX_PEXELS_WORKERS = 6
+
+# Objectifs de durée.
+MIN_LONG_DURATION = 120.0
+MAX_LONG_DURATION = 900.0
+
+MIN_SHORT_DURATION = 30.0
+MAX_SHORT_DURATION = 45.0
 
 
 # =========================================================
-# OUTILS GÉNÉRAUX
+# OUTILS GENERAUX
 # =========================================================
 
 def run_command(cmd, timeout=None):
@@ -73,10 +86,7 @@ def run_command(cmd, timeout=None):
 
 
 def ffprobe_value(path, selector):
-    if not path:
-        return None
-
-    if not os.path.exists(path):
+    if not path or not os.path.exists(path):
         return None
 
     cmd = [
@@ -100,12 +110,26 @@ def ffprobe_value(path, selector):
 
     try:
         return float(stdout.strip())
-
     except (TypeError, ValueError):
         return None
 
 
 def get_audio_duration(audio_path):
+    if not audio_path:
+        raise RuntimeError(
+            "Chemin audio manquant."
+        )
+
+    if not os.path.exists(audio_path):
+        raise RuntimeError(
+            "Le fichier audio n'existe pas."
+        )
+
+    if os.path.getsize(audio_path) < 1000:
+        raise RuntimeError(
+            "Le fichier audio est vide ou trop petit."
+        )
+
     duration = ffprobe_value(
         audio_path,
         "format=duration"
@@ -113,18 +137,14 @@ def get_audio_duration(audio_path):
 
     if duration is None or duration <= 0:
         raise RuntimeError(
-            "FFprobe n'a pas pu lire la durée réelle de la voix off. "
-            "Le fichier audio est absent, vide ou illisible."
+            "FFprobe ne peut pas lire la durée de la voix off."
         )
 
     return duration
 
 
 def file_is_valid_image(path):
-    if not path:
-        return False
-
-    if not os.path.exists(path):
+    if not path or not os.path.exists(path):
         return False
 
     try:
@@ -229,6 +249,7 @@ def call_openrouter(
     for attempt in range(3):
 
         try:
+
             response = requests.post(
                 OPENROUTER_URL,
                 headers=headers,
@@ -258,7 +279,6 @@ def call_openrouter(
 
                 try:
                     detail = response.json()
-
                 except Exception:
                     detail = response.text
 
@@ -268,6 +288,7 @@ def call_openrouter(
                 )
 
         except requests.RequestException as exc:
+
             last_error = str(exc)
 
         if attempt < 2:
@@ -280,309 +301,177 @@ def call_openrouter(
 
 
 # =========================================================
-# GÉNÉRATION DES SCRIPTS
+# GENERATION DES SCRIPTS
 # =========================================================
 
-def build_long_prompt(subject):
-    return f"""
-Vous êtes un scénariste expert pour une chaîne YouTube
-francophone.
-
-SUJET :
-{subject}
-
-OBJECTIF :
-
-Créer une vidéo longue informative, captivante et naturelle.
-
-La vidéo ne doit PAS être artificiellement rallongée.
-
-La durée cible est d'environ 3 à 4 minutes, mais la priorité
-absolue est que le contenu soit intéressant, cohérent et utile.
-
-Le script doit contenir environ 500 à 700 mots.
-
-IMPORTANT :
-
-Le contenu doit être factuel.
-
-N'inventez aucune étude.
-
-N'inventez aucun chiffre.
-
-N'inventez aucune citation.
-
-N'inventez aucun événement.
-
-N'affirmez pas comme certain un élément incertain.
-
-Si une information est controversée ou incertaine,
-présentez-la clairement comme telle.
-
-Le script doit avoir une progression narrative.
-
-Commencez avec un HOOK très fort.
-
-Le spectateur doit comprendre rapidement pourquoi
-le sujet est intéressant.
-
-Ensuite :
-
-1. HOOK
-2. INTRODUCTION
-3. PREMIÈRE EXPLICATION
-4. DEUXIÈME EXPLICATION
-5. EXEMPLE OU CAS CONCRET
-6. RÉVÉLATION OU INFORMATION SURPRENANTE
-7. CONCLUSION
-8. CTA
-
-Ne répétez pas inutilement les mêmes informations.
-
-La narration doit être naturelle lorsqu'elle est lue par
-une voix off.
-
-FORMAT :
-
-TITRE: titre de la vidéo
-
-HOOK: narration [IMAGE: english visual keywords]
-
-INTRO: narration [IMAGE: english visual keywords]
-
-PARTIE 1: narration [IMAGE: english visual keywords]
-
-PARTIE 2: narration [IMAGE: english visual keywords]
-
-PARTIE 3: narration [IMAGE: english visual keywords]
-
-PARTIE 4: narration [IMAGE: english visual keywords]
-
-REVELATION: narration [IMAGE: english visual keywords]
-
-CONCLUSION: narration [IMAGE: english visual keywords]
-
-CTA: Abonne-toi pour en savoir plus sur le monde.
-[IMAGE: youtube subscribe]
-
-RÈGLE VISUELLE :
-
-Ajoutez une balise [IMAGE: ...] environ toutes les
-1 à 2 phrases.
-
-Utilisez des mots-clés simples en anglais.
-
-Les mots-clés doivent décrire précisément ce qui est
-raconté à ce moment-là.
-
-Produisez environ 25 à 40 balises visuelles.
-
-Ne produisez pas 100 images.
-
-Ne mettez pas de texte explicatif autour du script.
-"""
-
-
-def build_short_prompt(subject):
-    return f"""
-Vous êtes un créateur expert de YouTube Shorts.
-
-SUJET :
-{subject}
-
-OBJECTIF :
-
-Créer un teaser très captivant qui donne envie de regarder
-la vidéo longue.
-
-Le Short doit être nettement plus court que la vidéo longue.
-
-Durée cible :
-30 à 45 secondes.
-
-Le script doit contenir environ 85 à 110 mots.
-
-Le contenu doit rester factuel.
-
-N'inventez aucune étude.
-
-N'inventez aucun chiffre.
-
-N'inventez aucun événement.
-
-N'inventez aucune citation.
-
-Le teaser doit donner une information intéressante sans
-révéler absolument toute la vidéo longue.
-
-STRUCTURE :
-
-1. HOOK très fort
-2. Mise en contexte rapide
-3. Information surprenante
-4. Question ou révélation
-5. Invitation à regarder la vidéo complète
-
-FORMAT :
-
-TITRE: titre court
-
-HOOK: narration [IMAGE: english visual keywords]
-
-TEASER: narration [IMAGE: english visual keywords]
-
-REVELATION: narration [IMAGE: english visual keywords]
-
-CTA: Retrouve la vidéo complète sur la chaîne.
-[IMAGE: youtube subscribe]
-
-Ajoutez une balise [IMAGE: ...] environ toutes les
-1 à 2 phrases.
-
-Produisez environ 8 à 14 balises visuelles.
-
-Ne produisez pas 50 images.
-
-Ne mettez pas d'explications supplémentaires.
-"""
-
-
-def generate_long_script(subject):
-    prompt = build_long_prompt(subject)
-
-    last_script = None
-    last_count = 0
-
-    for attempt in range(3):
-
-        extra_instruction = ""
-
-        if attempt > 0:
-            extra_instruction = f"""
-IMPORTANT :
-Votre précédente réponse était trop courte.
-
-Elle contenait environ {last_count} mots.
-
-Cette fois, produisez impérativement un script
-d'environ 500 à 700 mots.
-
-Ne remplissez pas artificiellement le texte.
-
-Ajoutez de vraies explications, exemples et informations
-pertinentes sur le sujet.
-"""
-
-        script = call_openrouter(
-            [
-                {
-                    "role": "system",
-                    "content": prompt
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"Rédige maintenant le script long "
-                        f"sur : {subject}\n\n"
-                        f"{extra_instruction}"
-                    )
-                }
-            ],
-            max_tokens=3500,
-            temperature=0.65
-        )
-
-        narration, _ = parse_script(script)
-
-        count = len(
-            narration.split()
-        )
-
-        last_script = script
-        last_count = count
-
-        if count >= 400:
-            return script
-
-        if attempt < 2:
-            retry_sleep(attempt)
-
-    raise RuntimeError(
-        f"Le modèle génère un script long trop court "
-        f"après 3 tentatives ({last_count} mots). "
-        f"Minimum accepté : 400 mots."
-    )
-
-
-def generate_short_script(subject):
-    prompt = build_short_prompt(subject)
-
-    last_script = None
-    last_count = 0
-
-    for attempt in range(3):
-
-        extra_instruction = ""
-
-        if attempt > 0:
-            extra_instruction = f"""
-IMPORTANT :
-Votre précédente réponse contenait environ
-{last_count} mots.
-
-Le Short doit contenir entre 85 et 110 mots.
-
-Réécrivez complètement le teaser.
-"""
-
-        script = call_openrouter(
-            [
-                {
-                    "role": "system",
-                    "content": prompt
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"Rédige maintenant le Short "
-                        f"sur : {subject}\n\n"
-                        f"{extra_instruction}"
-                    )
-                }
-            ],
-            max_tokens=1000,
-            temperature=0.7
-        )
-
-        narration, _ = parse_script(script)
-
-        count = len(
-            narration.split()
-        )
-
-        last_script = script
-        last_count = count
-
-        if 70 <= count <= 130:
-            return script
-
-        if attempt < 2:
-            retry_sleep(attempt)
-
-    raise RuntimeError(
-        f"Le Short généré contient {last_count} mots "
-        f"après 3 tentatives. "
-        f"Une nouvelle génération est nécessaire."
-    )
-
-
 def generate_pack_scripts(subject):
-    long_script = generate_long_script(
-        subject
+
+    long_system_prompt = f"""
+Vous êtes un scénariste expert pour une vidéo YouTube
+documentaire en français.
+
+SUJET:
+{subject}
+
+OBJECTIF:
+
+Créer une vidéo principale de plus de 2 minutes.
+
+Le script doit contenir environ 800 à 1050 mots.
+
+La narration doit être riche, structurée, naturelle,
+captivante et suffisamment développée.
+
+IMPORTANT:
+
+Ne jamais inventer de faits.
+
+Ne jamais inventer de chiffres.
+
+Ne jamais inventer de citations.
+
+Ne jamais inventer d'études.
+
+Ne jamais inventer d'événements.
+
+Si une information est incertaine, indiquez clairement
+qu'elle est incertaine.
+
+STRUCTURE:
+
+TITRE:
+titre YouTube
+
+HOOK:
+accroche forte
+
+INTRO:
+présentation du sujet
+
+PARTIE 1:
+première explication
+
+PARTIE 2:
+développement
+
+PARTIE 3:
+élément surprenant
+
+PARTIE 4:
+explication approfondie
+
+CONCLUSION:
+résumé et ouverture
+
+CTA:
+Abonne-toi pour en savoir plus sur le monde.
+
+VISUELS:
+
+Ajoutez une balise [IMAGE: english keywords]
+environ toutes les 1 à 2 phrases.
+
+Utilisez environ 25 à 40 balises visuelles.
+
+Les mots-clés doivent être simples et exploitables
+par une recherche Pexels.
+
+Exemples:
+
+[IMAGE: human brain]
+[IMAGE: person thinking]
+[IMAGE: neuroscience laboratory]
+[IMAGE: sleeping person]
+
+N'utilisez pas de descriptions extrêmement longues
+pour les visuels.
+
+Le texte doit rester naturel lorsque les balises
+[IMAGE: ...] sont retirées.
+"""
+
+    short_system_prompt = f"""
+Vous êtes créateur de Shorts YouTube.
+
+SUJET:
+{subject}
+
+OBJECTIF:
+
+Créer un teaser de 90 à 115 mots.
+
+La durée cible est d'environ 30 à 40 secondes.
+
+Le teaser doit être beaucoup plus court que la vidéo
+principale.
+
+Il doit donner envie de regarder la vidéo complète.
+
+Il doit révéler suffisamment d'informations pour être
+intéressant, sans raconter toute la vidéo.
+
+N'inventez aucun fait.
+
+FORMAT:
+
+TITRE:
+titre court
+
+HOOK:
+accroche très forte
+
+TEASER:
+développement rapide
+
+REVELATION:
+élément surprenant
+
+CTA:
+Retrouve la vidéo complète sur la chaîne.
+
+VISUELS:
+
+Ajoutez environ 8 à 12 balises:
+
+[IMAGE: english visual keywords]
+
+Les mots-clés doivent être simples et adaptés à Pexels.
+"""
+
+    long_script = call_openrouter(
+        [
+            {
+                "role": "system",
+                "content": long_system_prompt
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Rédige maintenant le script long "
+                    f"sur le sujet suivant: {subject}"
+                )
+            }
+        ],
+        max_tokens=5000,
+        temperature=0.65
     )
 
-    teaser_script = generate_short_script(
-        subject
+    teaser_script = call_openrouter(
+        [
+            {
+                "role": "system",
+                "content": short_system_prompt
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Rédige maintenant le teaser "
+                    f"sur le sujet suivant: {subject}"
+                )
+            }
+        ],
+        max_tokens=1600,
+        temperature=0.7
     )
 
     return (
@@ -596,6 +485,7 @@ def generate_pack_scripts(subject):
 # =========================================================
 
 def parse_script(script_text):
+
     narration_parts = []
     visual_prompts = []
 
@@ -617,9 +507,7 @@ def parse_script(script_text):
             keyword = match.strip()
 
             if keyword:
-                visual_prompts.append(
-                    keyword
-                )
+                visual_prompts.append(keyword)
 
         if re.match(
             r"^(TITRE|HASHTAGS?|SOURCES?)\s*:",
@@ -649,9 +537,7 @@ def parse_script(script_text):
         ).strip()
 
         if cleaned:
-            narration_parts.append(
-                cleaned
-            )
+            narration_parts.append(cleaned)
 
     narration = " ".join(
         narration_parts
@@ -670,136 +556,376 @@ def parse_script(script_text):
 
 
 # =========================================================
-# EDGE TTS
+# EDGE-TTS
 # =========================================================
 
-async def generate_audio_with_boundaries_async(
+def get_available_french_voices():
+
+    try:
+
+        import edge_tts
+
+        voices = asyncio_run_list_voices(
+            edge_tts
+        )
+
+        available = []
+
+        for voice in voices:
+
+            short_name = voice.get(
+                "ShortName",
+                ""
+            )
+
+            locale = voice.get(
+                "Locale",
+                ""
+            )
+
+            if (
+                short_name
+                and locale.lower().startswith("fr")
+            ):
+                available.append(
+                    short_name
+                )
+
+        return available
+
+    except Exception:
+        return []
+
+
+def asyncio_run_list_voices(edge_tts_module):
+
+    import asyncio
+
+    return asyncio.run(
+        edge_tts_module.list_voices()
+    )
+
+
+def build_voice_candidates():
+
+    available = get_available_french_voices()
+
+    candidates = []
+
+    for voice in PREFERRED_VOICES:
+
+        if voice in available:
+            candidates.append(voice)
+
+    for voice in available:
+
+        if voice not in candidates:
+            candidates.append(voice)
+
+    if not candidates:
+        candidates = list(
+            PREFERRED_VOICES
+        )
+
+    return candidates
+
+
+def clean_tts_text(text):
+
+    text = text.replace(
+        "\u000b",
+        " "
+    )
+
+    text = text.replace(
+        "\x00",
+        " "
+    )
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    )
+
+    return text.strip()
+
+
+def split_text_for_tts(
     text,
-    output_mp3
+    max_chars=2400
 ):
+
+    text = clean_tts_text(text)
+
+    if len(text) <= max_chars:
+        return [text]
+
+    sentences = re.split(
+        r"(?<=[.!?])\s+",
+        text
+    )
+
+    chunks = []
+    current = ""
+
+    for sentence in sentences:
+
+        sentence = sentence.strip()
+
+        if not sentence:
+            continue
+
+        candidate = (
+            f"{current} {sentence}"
+        ).strip()
+
+        if (
+            current
+            and len(candidate) > max_chars
+        ):
+
+            chunks.append(
+                current.strip()
+            )
+
+            current = sentence
+
+        else:
+
+            current = candidate
+
+    if current:
+        chunks.append(
+            current.strip()
+        )
+
+    return chunks
+
+
+def generate_tts_chunk(
+    text,
+    voice
+):
+
     import edge_tts
 
     communicate = edge_tts.Communicate(
         text,
-        VOICE,
-        rate="+8%"
+        voice,
+        rate="+5%",
+        boundary="WordBoundary"
     )
 
-    words = []
-    audio_received = False
+    audio_chunks = []
+    word_timings = []
 
-    with open(
-        output_mp3,
-        "wb"
-    ) as audio_file:
+    for chunk in communicate.stream_sync():
 
-        async for chunk in communicate.stream():
+        chunk_type = chunk.get(
+            "type"
+        )
 
-            chunk_type = chunk.get(
-                "type"
+        if chunk_type == "audio":
+
+            data = chunk.get(
+                "data"
             )
 
-            if chunk_type == "audio":
-
-                data = chunk.get(
-                    "data"
+            if data:
+                audio_chunks.append(
+                    data
                 )
 
-                if data:
-                    audio_file.write(
-                        data
-                    )
+        elif chunk_type == "WordBoundary":
 
-                    audio_received = True
+            word = str(
+                chunk.get(
+                    "text",
+                    ""
+                )
+            ).strip()
 
-            elif chunk_type == "WordBoundary":
+            offset = chunk.get(
+                "offset"
+            )
 
-                word = str(
-                    chunk.get(
-                        "text",
-                        ""
-                    )
-                ).strip()
+            duration = chunk.get(
+                "duration"
+            )
 
-                offset = chunk.get(
-                    "offset"
+            if (
+                word
+                and offset is not None
+                and duration is not None
+            ):
+
+                start = (
+                    float(offset)
+                    / 10_000_000
                 )
 
-                duration = chunk.get(
-                    "duration"
+                end = (
+                    float(offset)
+                    + float(duration)
+                ) / 10_000_000
+
+                word_timings.append(
+                    {
+                        "text": word,
+                        "start": start,
+                        "end": end
+                    }
                 )
 
-                if (
-                    word
-                    and offset is not None
-                    and duration is not None
-                ):
-                    words.append(
-                        {
-                            "text": word,
-                            "start": (
-                                float(offset)
-                                / 10_000_000
-                            ),
-                            "end": (
-                                float(offset)
-                                + float(duration)
-                            ) / 10_000_000
-                        }
-                    )
+    if not audio_chunks:
 
-    if not audio_received:
         raise RuntimeError(
-            "Edge-TTS n'a reçu aucun flux audio."
+            "No audio was received."
         )
 
-    if not words:
-        raise RuntimeError(
-            "Edge-TTS a généré l'audio mais aucune "
-            "WordBoundary n'a été reçue."
-        )
+    return (
+        b"".join(audio_chunks),
+        word_timings
+    )
 
-    if (
-        not os.path.exists(output_mp3)
-        or os.path.getsize(output_mp3) < 1000
-    ):
-        raise RuntimeError(
-            "Le fichier audio généré est absent "
-            "ou vide."
-        )
 
-    return words
+def write_mp3_from_chunks(
+    audio_chunks,
+    output_path
+):
+
+    with open(
+        output_path,
+        "wb"
+    ) as f:
+
+        for chunk in audio_chunks:
+
+            f.write(chunk)
 
 
 def generate_audio(
     text,
     output_mp3
 ):
-    if not text.strip():
+
+    if not text or not text.strip():
+
         return (
             None,
             None,
             "Narration vide."
         )
 
-    last_error = None
+    text = clean_tts_text(
+        text
+    )
 
-    for attempt in range(2):
+    chunks = split_text_for_tts(
+        text
+    )
+
+    voices = build_voice_candidates()
+
+    errors = []
+
+    for voice in voices:
+
+        all_audio_chunks = []
+        all_word_timings = []
+
+        global_offset = 0.0
+
+        voice_failed = False
+
+        for chunk_index, chunk_text in enumerate(chunks):
+
+            success = False
+            last_error = None
+
+            for attempt in range(3):
+
+                try:
+
+                    audio_data, words = generate_tts_chunk(
+                        chunk_text,
+                        voice
+                    )
+
+                    if not audio_data:
+                        raise RuntimeError(
+                            "Flux audio vide."
+                        )
+
+                    all_audio_chunks.append(
+                        audio_data
+                    )
+
+                    for item in words:
+
+                        all_word_timings.append(
+                            {
+                                "text": item["text"],
+                                "start": (
+                                    item["start"]
+                                    + global_offset
+                                ),
+                                "end": (
+                                    item["end"]
+                                    + global_offset
+                                )
+                            }
+                        )
+
+                    # Durée estimée par les WordBoundary.
+                    if words:
+
+                        chunk_duration = max(
+                            item["end"]
+                            for item in words
+                        )
+
+                        global_offset += (
+                            chunk_duration
+                            + 0.05
+                        )
+
+                    success = True
+                    break
+
+                except Exception as exc:
+
+                    last_error = str(exc)
+
+                    if attempt < 2:
+                        retry_sleep(
+                            attempt
+                        )
+
+            if not success:
+
+                voice_failed = True
+
+                errors.append(
+                    f"{voice} - morceau "
+                    f"{chunk_index + 1}: "
+                    f"{last_error}"
+                )
+
+                break
+
+        if voice_failed:
+            continue
+
+        if not all_audio_chunks:
+            continue
 
         try:
 
-            if os.path.exists(
+            write_mp3_from_chunks(
+                all_audio_chunks,
                 output_mp3
-            ):
-                os.remove(
-                    output_mp3
-                )
-
-            words = asyncio.run(
-                generate_audio_with_boundaries_async(
-                    text,
-                    output_mp3
-                )
             )
 
             duration = get_audio_duration(
@@ -811,23 +937,47 @@ def generate_audio(
                     "Durée audio invalide."
                 )
 
+            if not all_word_timings:
+                raise RuntimeError(
+                    "Aucune WordBoundary reçue."
+                )
+
             return (
                 output_mp3,
-                words,
+                all_word_timings,
                 None
             )
 
         except Exception as exc:
 
-            last_error = str(exc)
+            errors.append(
+                f"{voice} - validation: "
+                f"{exc}"
+            )
 
-            if attempt == 0:
-                retry_sleep(attempt)
+            if os.path.exists(
+                output_mp3
+            ):
+
+                try:
+                    os.remove(
+                        output_mp3
+                    )
+                except Exception:
+                    pass
+
+    error_text = "\n".join(
+        errors[-12:]
+    )
 
     return (
         None,
         None,
-        f"Edge-TTS a échoué : {last_error}"
+        "Edge-TTS n'a réussi avec aucune voix française.\n\n"
+        "Voix essayées:\n"
+        + "\n".join(voices)
+        + "\n\nDétails:\n"
+        + error_text
     )
 
 
@@ -840,30 +990,38 @@ def generate_ass_subtitles(
     output_ass,
     is_short=True
 ):
-    if is_short:
 
-        res_x = 1080
-        res_y = 1920
+    res_x = (
+        1080
+        if is_short
+        else 1920
+    )
 
-        font_size = 58
+    res_y = (
+        1920
+        if is_short
+        else 1080
+    )
 
-        margin_v = 260
+    font_size = (
+        58
+        if is_short
+        else 44
+    )
 
-        max_words = 3
+    margin_v = (
+        260
+        if is_short
+        else 90
+    )
 
-    else:
+    max_words = (
+        3
+        if is_short
+        else 5
+    )
 
-        res_x = 1920
-        res_y = 1080
-
-        font_size = 44
-
-        margin_v = 90
-
-        max_words = 5
-
-    header = f"""
-[Script Info]
+    header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {res_x}
 PlayResY: {res_y}
@@ -903,7 +1061,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             end = (
                 group[-1]["end"]
-                + 0.05
+                + 0.08
             )
 
             text = " ".join(
@@ -913,8 +1071,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             text = (
                 text
-                .replace("{", "(")
-                .replace("}", ")")
+                .replace(
+                    "{",
+                    "("
+                )
+                .replace(
+                    "}",
+                    ")"
+                )
             )
 
             f.write(
@@ -933,6 +1097,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 # =========================================================
 
 def pexels_headers():
+
     if not PEXELS_API_KEY:
         return {}
 
@@ -942,6 +1107,7 @@ def pexels_headers():
 
 
 def clean_visual_query(keyword):
+
     keyword = re.sub(
         r"[^a-zA-Z0-9\s-]",
         " ",
@@ -956,7 +1122,7 @@ def clean_visual_query(keyword):
 
     return (
         keyword[:100]
-        or "science technology"
+        or "abstract technology"
     )
 
 
@@ -964,6 +1130,7 @@ def download_binary(
     url,
     output_path
 ):
+
     response = requests.get(
         url,
         timeout=PEXELS_TIMEOUT,
@@ -982,9 +1149,7 @@ def download_binary(
         ):
 
             if chunk:
-                f.write(
-                    chunk
-                )
+                f.write(chunk)
 
     return output_path
 
@@ -995,6 +1160,7 @@ def fetch_pexels_photo(
     temp_dir,
     is_short
 ):
+
     if not PEXELS_API_KEY:
         raise RuntimeError(
             "PEXELS_API_KEY manquante."
@@ -1006,20 +1172,20 @@ def fetch_pexels_photo(
         else "landscape"
     )
 
-    query = clean_visual_query(
+    clean_query = clean_visual_query(
         keyword
     )
 
     query_variants = [
-        query,
-        query.replace(
+        clean_query,
+        clean_query.replace(
             "human",
             "person"
         ),
-        query.replace(
+        clean_query.replace(
             "scientific",
             "science"
-        )
+        ),
     ]
 
     output = os.path.join(
@@ -1027,7 +1193,7 @@ def fetch_pexels_photo(
         f"photo_{idx:03d}.jpg"
     )
 
-    for current_query in query_variants:
+    for query in query_variants:
 
         try:
 
@@ -1035,7 +1201,7 @@ def fetch_pexels_photo(
                 "https://api.pexels.com/v1/search",
                 headers=pexels_headers(),
                 params={
-                    "query": current_query,
+                    "query": query,
                     "orientation": orientation,
                     "size": "large",
                     "per_page": 15
@@ -1047,8 +1213,12 @@ def fetch_pexels_photo(
                 continue
 
             photos = (
-                response.json()
-                .get("photos", [])
+                response
+                .json()
+                .get(
+                    "photos",
+                    []
+                )
             )
 
             if not photos:
@@ -1105,7 +1275,7 @@ def fetch_pexels_photo(
             continue
 
     raise RuntimeError(
-        f"Aucun visuel Pexels trouvé pour : "
+        f"Aucun visuel Pexels pour: "
         f"{keyword}"
     )
 
@@ -1116,6 +1286,7 @@ def fetch_pexels_video(
     temp_dir,
     is_short
 ):
+
     if not PEXELS_API_KEY:
         raise RuntimeError(
             "PEXELS_API_KEY manquante."
@@ -1154,8 +1325,12 @@ def fetch_pexels_video(
             return None
 
         videos = (
-            response.json()
-            .get("videos", [])
+            response
+            .json()
+            .get(
+                "videos",
+                []
+            )
         )
 
         if not videos:
@@ -1235,9 +1410,13 @@ def fetch_pexels_video(
                 if os.path.exists(
                     output
                 ):
-                    os.remove(
-                        output
-                    )
+
+                    try:
+                        os.remove(
+                            output
+                        )
+                    except Exception:
+                        pass
 
     except Exception:
         return None
@@ -1251,16 +1430,12 @@ def make_placeholder(
     temp_dir,
     is_short
 ):
-    if is_short:
-        width, height = (
-            1080,
-            1920
-        )
-    else:
-        width, height = (
-            1920,
-            1080
-        )
+
+    width, height = (
+        (1080, 1920)
+        if is_short
+        else (1920, 1080)
+    )
 
     path = os.path.join(
         temp_dir,
@@ -1293,6 +1468,7 @@ def fetch_visuals(
     is_short,
     target_count
 ):
+
     if not prompts:
 
         prompts = [
@@ -1303,39 +1479,65 @@ def fetch_visuals(
             "night city"
         ]
 
-    prompts = list(
-        prompts
-    )
+    unique_prompts = []
 
-    original_prompts = list(
-        prompts
-    )
+    for prompt in prompts:
 
-    while len(prompts) < target_count:
-
-        prompts.extend(
-            original_prompts
+        prompt = clean_visual_query(
+            prompt
         )
 
-    prompts = prompts[
+        if (
+            prompt
+            and prompt not in unique_prompts
+        ):
+
+            unique_prompts.append(
+                prompt
+            )
+
+    if not unique_prompts:
+
+        unique_prompts = [
+            "human brain",
+            "person thinking",
+            "science laboratory"
+        ]
+
+    expanded = []
+
+    index = 0
+
+    while len(expanded) < target_count:
+
+        expanded.append(
+            unique_prompts[
+                index
+                % len(unique_prompts)
+            ]
+        )
+
+        index += 1
+
+    expanded = expanded[
         :target_count
     ]
 
     jobs = [
         (idx, prompt)
         for idx, prompt
-        in enumerate(prompts)
+        in enumerate(expanded)
     ]
 
     results = [
         None
-        for _ in jobs
-    ]
+    ] * len(jobs)
 
     def worker(item):
 
         idx, prompt = item
 
+        # Les Shorts utilisent davantage de vidéos.
         prefer_video = (
             is_short
             or idx % 3 == 1
@@ -1426,19 +1628,12 @@ def render_image_scene(
     is_short,
     effect_index
 ):
-    if is_short:
 
-        width, height = (
-            1080,
-            1920
-        )
-
-    else:
-
-        width, height = (
-            1920,
-            1080
-        )
+    width, height = (
+        (1080, 1920)
+        if is_short
+        else (1920, 1080)
+    )
 
     duration = max(
         0.8,
@@ -1451,7 +1646,7 @@ def render_image_scene(
         (1.00, 1.08, "center"),
         (1.08, 1.00, "center"),
         (1.00, 1.06, "left"),
-        (1.06, 1.00, "right")
+        (1.06, 1.00, "right"),
     ]
 
     start_zoom, end_zoom, anchor = (
@@ -1485,7 +1680,7 @@ def render_image_scene(
         "ih/2-(ih/zoom/2)"
     )
 
-    frame_count = max(
+    total_frames = max(
         1,
         int(
             duration * fps
@@ -1493,9 +1688,9 @@ def render_image_scene(
     )
 
     zoom_expr = (
-        f"{start_zoom}"
-        f"+({end_zoom}-{start_zoom})"
-        f"*on/{max(1, frame_count - 1)}"
+        f"{start_zoom}+"
+        f"({end_zoom}-{start_zoom})"
+        f"*on/{max(1, total_frames - 1)}"
     )
 
     vf = (
@@ -1506,7 +1701,7 @@ def render_image_scene(
         f"z='{zoom_expr}':"
         f"x='{x_expr}':"
         f"y='{y_expr}':"
-        f"d={frame_count}:"
+        f"d={total_frames}:"
         f"s={width}x{height}:"
         f"fps={fps},"
         "format=yuv420p"
@@ -1556,8 +1751,8 @@ def render_image_scene(
     ):
 
         raise RuntimeError(
-            "FFmpeg scène image : "
-            f"{stderr[-2500:]}"
+            "FFmpeg scène image:\n"
+            + stderr[-2500:]
         )
 
     return output_path
@@ -1573,19 +1768,12 @@ def render_video_scene(
     output_path,
     is_short
 ):
-    if is_short:
 
-        width, height = (
-            1080,
-            1920
-        )
-
-    else:
-
-        width, height = (
-            1920,
-            1080
-        )
+    width, height = (
+        (1080, 1920)
+        if is_short
+        else (1920, 1080)
+    )
 
     duration = max(
         0.8,
@@ -1643,21 +1831,22 @@ def render_video_scene(
     ):
 
         raise RuntimeError(
-            "FFmpeg scène vidéo : "
-            f"{stderr[-2500:]}"
+            "FFmpeg scène vidéo:\n"
+            + stderr[-2500:]
         )
 
     return output_path
 
 
 # =========================================================
-# CONCATÉNATION
+# CONCATENATION
 # =========================================================
 
 def concat_scene_files(
     scene_files,
     output_path
 ):
+
     concat_file = os.path.join(
         os.path.dirname(
             output_path
@@ -1675,7 +1864,10 @@ def concat_scene_files(
 
             safe = (
                 os.path.abspath(path)
-                .replace("\\", "/")
+                .replace(
+                    "\\",
+                    "/"
+                )
                 .replace(
                     "'",
                     "'\\''"
@@ -1713,29 +1905,29 @@ def concat_scene_files(
     ):
 
         raise RuntimeError(
-            "FFmpeg concat : "
-            f"{stderr[-3000:]}"
+            "FFmpeg concat:\n"
+            + stderr[-3000:]
         )
 
     return output_path
 
 
 # =========================================================
-# DURÉES DES SCÈNES
+# CALCUL DES DUREES DES SCENES
 # =========================================================
 
 def calculate_scene_durations(
     audio_duration,
     scene_count
 ):
+
     if scene_count <= 0:
         return []
 
-    minimum_scene_duration = 1.25
+    minimum_scene = 1.25
 
-    if (
-        audio_duration
-        < minimum_scene_duration
+    if audio_duration < (
+        minimum_scene
         * scene_count
     ):
 
@@ -1743,23 +1935,27 @@ def calculate_scene_durations(
             1,
             int(
                 audio_duration
-                / minimum_scene_duration
+                / minimum_scene
             )
         )
 
-    if scene_count <= 0:
-        return []
+    if scene_count == 1:
+        return [
+            audio_duration
+        ]
 
     weights = []
 
-    for index in range(
+    for idx in range(
         scene_count
     ):
 
         variation = (
             0.85
             + (
-                (index * 17) % 35
+                (
+                    idx * 17
+                ) % 30
             ) / 100
         )
 
@@ -1778,37 +1974,44 @@ def calculate_scene_durations(
         for weight in weights
     ]
 
-    # On garantit une durée minimale.
+    # Garantit une durée minimum.
     durations = [
         max(
-            minimum_scene_duration,
-            duration
+            minimum_scene,
+            value
         )
-        for duration in durations
+        for value in durations
     ]
 
     total = sum(
         durations
     )
 
-    # On réajuste pour obtenir exactement la durée audio.
-    if total > 0:
+    # On renormalise pour correspondre exactement
+    # à la durée de l'audio.
+    scale = (
+        audio_duration
+        / total
+    )
 
-        factor = (
-            audio_duration
-            / total
-        )
+    durations = [
+        value * scale
+        for value in durations
+    ]
 
-        durations = [
-            duration * factor
-            for duration in durations
-        ]
+    # Correction finale des arrondis.
+    difference = (
+        audio_duration
+        - sum(durations)
+    )
+
+    durations[-1] += difference
 
     return durations
 
 
 # =========================================================
-# MONTAGE COMPLET
+# CREATION VIDEO
 # =========================================================
 
 def create_video_ffmpeg(
@@ -1818,6 +2021,7 @@ def create_video_ffmpeg(
     output_path,
     is_short
 ):
+
     if not visuals:
         return (
             None,
@@ -1833,8 +2037,7 @@ def create_video_ffmpeg(
 
         return (
             None,
-            "Voix off absente. "
-            "Montage annulé."
+            "Voix off absente."
         )
 
     if (
@@ -1846,8 +2049,7 @@ def create_video_ffmpeg(
 
         return (
             None,
-            "Sous-titres absents. "
-            "Montage annulé."
+            "Sous-titres absents."
         )
 
     try:
@@ -1856,36 +2058,47 @@ def create_video_ffmpeg(
             audio_path
         )
 
-        # On réduit le nombre de scènes si nécessaire.
-        max_scene_count = (
-            18
-            if is_short
-            else 45
-        )
-
-        visuals = visuals[
-            :max_scene_count
-        ]
-
-        durations = calculate_scene_durations(
-            audio_duration,
-            len(visuals)
-        )
-
-        if not durations:
-            return (
-                None,
-                "Impossible de calculer les durées."
+        if audio_duration <= 0:
+            raise RuntimeError(
+                "Durée audio invalide."
             )
 
-        scene_count = min(
-            len(visuals),
-            len(durations)
-        )
+        # On évite un nombre excessif de scènes.
+        if is_short:
+
+            scene_count = min(
+                len(visuals),
+                12
+            )
+
+        else:
+
+            scene_count = min(
+                len(visuals),
+                max(
+                    20,
+                    min(
+                        35,
+                        int(
+                            audio_duration
+                            / 4.0
+                        )
+                    )
+                )
+            )
 
         visuals = visuals[
             :scene_count
         ]
+
+        scene_count = len(
+            visuals
+        )
+
+        durations = calculate_scene_durations(
+            audio_duration,
+            scene_count
+        )
 
         temp_dir = tempfile.mkdtemp(
             prefix="studio_scenes_"
@@ -1897,7 +2110,9 @@ def create_video_ffmpeg(
             visuals
         ):
 
-            duration = durations[idx]
+            duration = durations[
+                idx
+            ]
 
             scene_path = os.path.join(
                 temp_dir,
@@ -1937,6 +2152,12 @@ def create_video_ffmpeg(
             silent_video
         )
 
+        width, height = (
+            (1080, 1920)
+            if is_short
+            else (1920, 1080)
+        )
+
         clean_ass = os.path.abspath(
             ass_subtitles_path
         ).replace(
@@ -1953,44 +2174,57 @@ def create_video_ffmpeg(
         cmd = [
             "ffmpeg",
             "-y",
+
             "-i",
             silent_video,
+
             "-i",
             audio_path,
+
             "-filter_complex",
-            (
-                f"[0:v]subtitles="
-                f"'{clean_ass}'[v]"
-            ),
+            f"[0:v]subtitles='{clean_ass}'[v]",
+
             "-map",
             "[v]",
+
             "-map",
             "1:a:0",
+
             "-c:v",
             "libx264",
+
             "-preset",
             "veryfast",
+
             "-crf",
             "21",
+
             "-pix_fmt",
             "yuv420p",
+
             "-c:a",
             "aac",
+
             "-b:a",
             "192k",
+
             "-ar",
             "48000",
+
             "-r",
             "25",
+
             "-shortest",
+
             "-movflags",
             "+faststart",
+
             output_path
         ]
 
         code, stdout, stderr = run_command(
             cmd,
-            timeout=600
+            timeout=900
         )
 
         if (
@@ -2033,27 +2267,26 @@ def create_video_ffmpeg(
             return (
                 None,
                 "FFmpeg a échoué.\n\n"
-                f"Log complet : {log_path}\n\n"
-                f"{stderr[-4000:]}"
+                f"Log complet: {log_path}\n\n"
+                + stderr[-4000:]
             )
 
-        final_duration = ffprobe_value(
+        duration = ffprobe_value(
             output_path,
             "format=duration"
         )
 
         if (
-            final_duration is None
-            or final_duration <= 0
+            duration is None
+            or duration <= 0
         ):
 
             return (
                 None,
-                "Le MP4 final est illisible "
-                "selon FFprobe."
+                "Le MP4 final est illisible."
             )
 
-        # Vérification obligatoire de la piste audio.
+        # Vérification audio.
         probe_cmd = [
             "ffprobe",
             "-v",
@@ -2079,8 +2312,8 @@ def create_video_ffmpeg(
 
             return (
                 None,
-                "Contrôle qualité échoué : "
-                "aucune piste audio dans le MP4 final."
+                "Contrôle qualité échoué: "
+                "aucune piste audio."
             )
 
         return (
@@ -2092,19 +2325,21 @@ def create_video_ffmpeg(
 
         return (
             None,
-            f"Erreur montage : {exc}"
+            f"Erreur montage: {exc}"
         )
 
 
 # =========================================================
-# VALIDATION DES DURÉES
+# VALIDATION DES DUREES
 # =========================================================
 
 def validate_duration(
     duration,
     is_short
 ):
+
     if duration is None:
+
         return (
             False,
             "Durée impossible à déterminer."
@@ -2112,19 +2347,24 @@ def validate_duration(
 
     if is_short:
 
-        # Le Short est volontairement plus court.
-        if duration < 28:
-            return (
-                False,
-                f"Le Short dure {duration:.1f}s. "
-                "Il doit durer environ 30 à 45 secondes."
-            )
+        if (
+            duration
+            < MIN_SHORT_DURATION
+            or duration
+            > MAX_SHORT_DURATION
+        ):
 
-        if duration > 45:
             return (
                 False,
-                f"Le Short dure {duration:.1f}s. "
-                "Il doit rester sous environ 45 secondes."
+                (
+                    f"Le Short dure "
+                    f"{duration:.1f}s. "
+                    f"Il doit être entre "
+                    f"{MIN_SHORT_DURATION:.0f} "
+                    f"et "
+                    f"{MAX_SHORT_DURATION:.0f} "
+                    "secondes."
+                )
             )
 
         return (
@@ -2132,14 +2372,34 @@ def validate_duration(
             None
         )
 
-    # NOUVELLE RÈGLE :
-    # plus de 2 minutes, pas 5 minutes.
-    if duration <= 120:
+    if (
+        duration
+        <= MIN_LONG_DURATION
+    ):
 
         return (
             False,
-            f"La vidéo longue dure {duration:.1f}s. "
-            "Elle doit dépasser 2 minutes."
+            (
+                f"La vidéo longue dure "
+                f"{duration:.1f}s. "
+                "Elle doit dépasser "
+                "2 minutes."
+            )
+        )
+
+    if (
+        duration
+        > MAX_LONG_DURATION
+    ):
+
+        return (
+            False,
+            (
+                f"La vidéo longue dure "
+                f"{duration:.1f}s. "
+                "Elle dépasse la limite "
+                "raisonnable de génération."
+            )
         )
 
     return (
@@ -2149,7 +2409,7 @@ def validate_duration(
 
 
 # =========================================================
-# INTERFACE STREAMLIT
+# INTERFACE
 # =========================================================
 
 st.title(
@@ -2163,84 +2423,45 @@ st.write(
 )
 
 
-# ---------------------------------------------------------
-# CONFIGURATION
-# ---------------------------------------------------------
-
 with st.expander(
     "⚙️ État de la configuration",
     expanded=False
 ):
 
     if OPENROUTER_API_KEY:
-
         st.success(
-            "OpenRouter : configuré"
+            "OpenRouter configuré"
         )
-
     else:
-
         st.error(
-            "OpenRouter : clé manquante"
+            "OPENROUTER_API_KEY manquante"
         )
 
     if PEXELS_API_KEY:
-
         st.success(
-            "Pexels : configuré"
+            "Pexels configuré"
         )
-
     else:
-
         st.error(
-            "Pexels : clé manquante"
+            "PEXELS_API_KEY manquante"
         )
 
-    st.write(
-        f"Modèle IA : {OPENROUTER_MODEL}"
+    st.info(
+        "Voix principale: "
+        "fr-FR-HenriNeural\n\n"
+        "Voix de secours: "
+        "Denise, Eloise et autres voix françaises disponibles."
     )
 
-    st.write(
-        f"Voix : {VOICE}"
-    )
-
-    st.write(
-        "Durée vidéo longue : plus de 2 minutes"
-    )
-
-    st.write(
-        "Durée Short : environ 30 à 45 secondes"
-    )
-
-
-# ---------------------------------------------------------
-# SUJET
-# ---------------------------------------------------------
 
 subject_input = st.text_input(
     "Sujet principal de la vidéo",
     placeholder=(
-        "Exemple : Pourquoi le cerveau procrastine ?"
+        "Exemple: Pourquoi le cerveau procrastine ?"
     ),
     key="subject_main"
 )
 
-
-if (
-    not OPENROUTER_API_KEY
-    or not PEXELS_API_KEY
-):
-
-    st.warning(
-        "Vérifiez vos clés API dans les variables "
-        "d'environnement de Render avant de lancer "
-        "la génération."
-    )
-
-
-# =========================================================
-# BOUTON DE GÉNÉRATION
-# =========================================================
 
 if st.button(
     "🚀 Générer le Pack Duo",
@@ -2252,6 +2473,22 @@ if st.button(
 
         st.warning(
             "Veuillez saisir un sujet."
+        )
+
+        st.stop()
+
+    if not OPENROUTER_API_KEY:
+
+        st.error(
+            "OPENROUTER_API_KEY manquante."
+        )
+
+        st.stop()
+
+    if not PEXELS_API_KEY:
+
+        st.error(
+            "PEXELS_API_KEY manquante."
         )
 
         st.stop()
@@ -2288,19 +2525,21 @@ if st.button(
     try:
 
         # =================================================
-        # ÉTAPE 1
+        # 1. SCRIPTS
         # =================================================
 
         status.info(
-            "1/7 Génération du script long..."
+            "1/7 Génération des deux scripts..."
         )
 
         progress.progress(
             5
         )
 
-        script_long = generate_long_script(
-            subject_input.strip()
+        script_long, script_teaser = (
+            generate_pack_scripts(
+                subject_input.strip()
+            )
         )
 
         narration_long, prompts_long = (
@@ -2309,61 +2548,46 @@ if st.button(
             )
         )
 
-        long_word_count = len(
-            narration_long.split()
-        )
-
-        if long_word_count < 400:
-
-            raise RuntimeError(
-                f"Le script long contient "
-                f"{long_word_count} mots. "
-                "Il doit contenir au moins "
-                "400 mots."
-            )
-
-        # =================================================
-        # ÉTAPE 1 BIS
-        # =================================================
-
-        status.info(
-            "1/7 Génération du Short..."
-        )
-
-        progress.progress(
-            10
-        )
-
-        script_teaser = generate_short_script(
-            subject_input.strip()
-        )
-
         narration_teaser, prompts_teaser = (
             parse_script(
                 script_teaser
             )
         )
 
-        teaser_word_count = len(
+        long_word_count = len(
+            narration_long.split()
+        )
+
+        short_word_count = len(
             narration_teaser.split()
         )
 
-        if not (
-            70
-            <= teaser_word_count
-            <= 130
+        if long_word_count < 700:
+
+            raise RuntimeError(
+                (
+                    f"Le script long contient "
+                    f"{long_word_count} mots. "
+                    "Il est trop court. "
+                    "Il faut au moins environ "
+                    "700 mots pour viser plus "
+                    "de 2 minutes."
+                )
+            )
+
+        if (
+            short_word_count < 80
+            or short_word_count > 130
         ):
 
             raise RuntimeError(
-                f"Le Short contient "
-                f"{teaser_word_count} mots. "
-                "La cible est d'environ "
-                "85 à 110 mots."
+                (
+                    f"Le teaser contient "
+                    f"{short_word_count} mots. "
+                    "Il doit contenir environ "
+                    "90 à 115 mots."
+                )
             )
-
-        # =================================================
-        # AFFICHAGE DES SCRIPTS
-        # =================================================
 
         with st.expander(
             "📜 Voir les scripts",
@@ -2371,7 +2595,7 @@ if st.button(
         ):
 
             st.write(
-                f"Script long : "
+                f"Script long: "
                 f"{long_word_count} mots"
             )
 
@@ -2382,8 +2606,8 @@ if st.button(
             )
 
             st.write(
-                f"Script Short : "
-                f"{teaser_word_count} mots"
+                f"Script Short: "
+                f"{short_word_count} mots"
             )
 
             st.text_area(
@@ -2393,7 +2617,7 @@ if st.button(
             )
 
         # =================================================
-        # ÉTAPE 2
+        # 2. VOIX LONGUE
         # =================================================
 
         status.info(
@@ -2401,7 +2625,7 @@ if st.button(
         )
 
         progress.progress(
-            18
+            15
         )
 
         long_audio = os.path.join(
@@ -2423,7 +2647,8 @@ if st.button(
 
         if err:
             raise RuntimeError(
-                err
+                "Voix longue:\n\n"
+                + err
             )
 
         duration_long = get_audio_duration(
@@ -2450,12 +2675,14 @@ if st.button(
         )
 
         st.success(
-            f"Voix off longue générée : "
-            f"{duration_long:.1f} secondes"
+            (
+                f"Voix longue générée: "
+                f"{duration_long:.1f}s"
+            )
         )
 
         # =================================================
-        # ÉTAPE 3
+        # 3. VOIX SHORT
         # =================================================
 
         status.info(
@@ -2484,8 +2711,10 @@ if st.button(
         )
 
         if err:
+
             raise RuntimeError(
-                err
+                "Voix Short:\n\n"
+                + err
             )
 
         duration_teaser = get_audio_duration(
@@ -2512,48 +2741,37 @@ if st.button(
         )
 
         st.success(
-            f"Short audio : "
-            f"{duration_teaser:.1f} secondes"
+            (
+                f"Voix Short générée: "
+                f"{duration_teaser:.1f}s"
+            )
         )
 
         # =================================================
-        # CALCUL DES VISUELS
+        # 4. VISUELS LONGS
         # =================================================
 
         count_long = max(
-            18,
+            20,
             min(
-                40,
+                35,
                 int(
                     duration_long
-                    / 5.0
+                    / 4.0
                 )
             )
         )
-
-        count_teaser = max(
-            8,
-            min(
-                14,
-                int(
-                    duration_teaser
-                    / 3.0
-                )
-            )
-        )
-
-        # =================================================
-        # ÉTAPE 4
-        # =================================================
 
         status.info(
-            f"4/7 Téléchargement des visuels "
-            f"de la vidéo longue "
-            f"({count_long})..."
+            (
+                "4/7 Téléchargement des "
+                f"visuels longs "
+                f"({count_long})..."
+            )
         )
 
         progress.progress(
-            42
+            45
         )
 
         long_visual_dir = os.path.join(
@@ -2583,12 +2801,26 @@ if st.button(
             )
 
         # =================================================
-        # ÉTAPE 5
+        # 5. VISUELS SHORT
         # =================================================
 
+        count_teaser = max(
+            8,
+            min(
+                12,
+                int(
+                    duration_teaser
+                    / 3.0
+                )
+            )
+        )
+
         status.info(
-            f"5/7 Téléchargement des visuels "
-            f"du Short ({count_teaser})..."
+            (
+                "5/7 Téléchargement des "
+                f"visuels du Short "
+                f"({count_teaser})..."
+            )
         )
 
         progress.progress(
@@ -2622,7 +2854,7 @@ if st.button(
             )
 
         # =================================================
-        # ÉTAPE 6
+        # 6. MONTAGE LONG
         # =================================================
 
         status.info(
@@ -2655,7 +2887,7 @@ if st.button(
             )
 
         # =================================================
-        # SHORT
+        # 6. MONTAGE SHORT
         # =================================================
 
         status.info(
@@ -2688,7 +2920,7 @@ if st.button(
             )
 
         # =================================================
-        # ÉTAPE 7
+        # 7. CONTROLE QUALITE
         # =================================================
 
         status.info(
@@ -2696,7 +2928,7 @@ if st.button(
         )
 
         progress.progress(
-            94
+            95
         )
 
         final_long_duration = (
@@ -2730,97 +2962,105 @@ if st.button(
         if not valid_long:
 
             raise RuntimeError(
-                f"Contrôle vidéo longue : "
-                f"{err_long}"
+                (
+                    "Contrôle vidéo longue: "
+                    + err_long
+                )
             )
 
         if not valid_teaser:
 
             raise RuntimeError(
-                f"Contrôle Short : "
-                f"{err_teaser}"
+                (
+                    "Contrôle Short: "
+                    + err_teaser
+                )
             )
-
-        # =================================================
-        # TERMINÉ
-        # =================================================
 
         progress.progress(
             100
         )
 
         status.success(
-            "Génération terminée. "
-            "Les deux vidéos ont passé "
-            "les contrôles de base."
-        )
-
-        st.success(
-            "🎉 Pack Duo prêt !"
+            "🎉 Génération terminée. "
+            "Les deux vidéos ont passé les contrôles."
         )
 
         # =================================================
-        # VIDÉO LONGUE
+        # RESULTATS
         # =================================================
 
-        st.subheader(
-            "🎥 Vidéo longue"
+        col1, col2 = st.columns(
+            2
         )
 
-        st.caption(
-            f"Durée : "
-            f"{final_long_duration:.1f}s "
-            f"({final_long_duration / 60:.1f} min) "
-            f"| {len(visuals_long)} visuels"
-        )
+        with col1:
 
-        st.video(
-            long_output
-        )
-
-        with open(
-            long_output,
-            "rb"
-        ) as f:
-
-            st.download_button(
-                "📥 Télécharger la vidéo longue",
-                data=f.read(),
-                file_name="video_longue.mp4",
-                mime="video/mp4",
-                key="download_long"
+            st.subheader(
+                "🎥 Vidéo longue"
             )
 
-        # =================================================
-        # SHORT
-        # =================================================
-
-        st.subheader(
-            "📱 Short teaser"
-        )
-
-        st.caption(
-            f"Durée : "
-            f"{final_teaser_duration:.1f}s "
-            f"| {len(visuals_teaser)} visuels"
-        )
-
-        st.video(
-            teaser_output
-        )
-
-        with open(
-            teaser_output,
-            "rb"
-        ) as f:
-
-            st.download_button(
-                "📥 Télécharger le Short",
-                data=f.read(),
-                file_name="short_teaser.mp4",
-                mime="video/mp4",
-                key="download_teaser"
+            st.caption(
+                (
+                    f"Durée: "
+                    f"{final_long_duration:.1f}s "
+                    f"| "
+                    f"{len(visuals_long)} visuels"
+                )
             )
+
+            st.video(
+                long_output
+            )
+
+            with open(
+                long_output,
+                "rb"
+            ) as f:
+
+                st.download_button(
+                    "📥 Télécharger la vidéo longue",
+                    data=f.read(),
+                    file_name=(
+                        "video_longue.mp4"
+                    ),
+                    mime="video/mp4",
+                    key="download_long"
+                )
+
+        with col2:
+
+            st.subheader(
+                "📱 Short teaser"
+            )
+
+            st.caption(
+                (
+                    f"Durée: "
+                    f"{final_teaser_duration:.1f}s "
+                    f"| "
+                    f"{len(visuals_teaser)} visuels"
+                )
+            )
+
+            st.video(
+                teaser_output
+            )
+
+            with open(
+                teaser_output,
+                "rb"
+            ) as f:
+
+                st.download_button(
+                    "📥 Télécharger le Short",
+                    data=f.read(),
+                    file_name=(
+                        "short_teaser.mp4"
+                    ),
+                    mime="video/mp4",
+                    key="download_teaser"
+                )
 
     except Exception as exc:
 
@@ -2835,6 +3075,9 @@ if st.button(
         )
 
         st.caption(
-            f"Dossier de travail : "
-            f"{work_dir}"
+            "Dossier de travail:"
         )
+
+        st.code(
+            work_dir
+)
