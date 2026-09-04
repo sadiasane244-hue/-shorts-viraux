@@ -6,7 +6,6 @@ import math
 import shutil
 import random
 import asyncio
-import tempfile
 import subprocess
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
@@ -25,12 +24,8 @@ APP_TITLE = "Studio Vidéo IA"
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Modèle principal
 OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct"
 
-# Modèles de secours.
-# OpenRouter les essaiera automatiquement si le modèle principal
-# ou ses fournisseurs rencontrent un problème.
 OPENROUTER_FALLBACK_MODELS = [
     "meta-llama/llama-3.3-70b-instruct",
     "google/gemini-2.0-flash-001",
@@ -42,9 +37,6 @@ PEXELS_SEARCH_URL = "https://api.pexels.com/v1/search"
 # ============================================================
 # SEUILS DE LONGUEUR
 # ============================================================
-
-# Ces valeurs servent à choisir la stratégie de production.
-# Elles ne constituent PAS des erreurs bloquantes.
 
 REGENERATE_BELOW = 200
 
@@ -89,14 +81,12 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 # ============================================================
 
 def get_secret(name: str, default: str = "") -> str:
-    """
-    Cherche une variable d'abord dans Streamlit Secrets,
-    puis dans les variables d'environnement.
-    """
     try:
         value = st.secrets.get(name)
+
         if value:
             return str(value)
+
     except Exception:
         pass
 
@@ -116,13 +106,11 @@ def normalize_text(text: str) -> str:
         return ""
 
     text = str(text)
+
     text = text.replace("\r\n", "\n")
     text = text.replace("\r", "\n")
 
-    # Nettoyage des espaces
     text = re.sub(r"[ \t]+", " ", text)
-
-    # Nettoyage des lignes multiples
     text = re.sub(r"\n{3,}", "\n\n", text)
 
     return text.strip()
@@ -134,31 +122,37 @@ def count_words(text: str) -> int:
     if not text:
         return 0
 
-    return len(re.findall(r"\b[\wÀ-ÿ'-]+\b", text))
+    return len(
+        re.findall(
+            r"\b[\wÀ-ÿ'-]+\b",
+            text,
+        )
+    )
 
 
 def clean_ai_text(text: str) -> str:
-    """
-    Nettoie les éventuels blocs Markdown ou balises inutiles
-    renvoyés par le modèle.
-    """
     if not text:
         return ""
 
     text = str(text).strip()
 
-    # Retirer les blocs JSON/Markdown accidentels
-    text = re.sub(r"^```(?:text|markdown|json)?\s*", "", text, flags=re.I)
-    text = re.sub(r"\s*```$", "", text)
+    text = re.sub(
+        r"^```(?:text|markdown|json)?\s*",
+        "",
+        text,
+        flags=re.I,
+    )
+
+    text = re.sub(
+        r"\s*```$",
+        "",
+        text,
+    )
 
     return normalize_text(text)
 
 
 def extract_json_object(text: str) -> Optional[dict]:
-    """
-    Essaie d'extraire un objet JSON même si le modèle a ajouté
-    quelques explications autour.
-    """
     if not text:
         return None
 
@@ -166,14 +160,23 @@ def extract_json_object(text: str) -> Optional[dict]:
 
     try:
         return json.loads(text)
+
     except Exception:
         pass
 
-    match = re.search(r"\{.*\}", text, flags=re.S)
+    match = re.search(
+        r"\{.*\}",
+        text,
+        flags=re.S,
+    )
 
     if match:
+
         try:
-            return json.loads(match.group(0))
+            return json.loads(
+                match.group(0)
+            )
+
         except Exception:
             return None
 
@@ -187,11 +190,9 @@ def extract_json_object(text: str) -> Optional[dict]:
 def run_command(
     command: List[str],
     timeout: int = 300,
-    cwd: Optional[str] = None
+    cwd: Optional[str] = None,
 ) -> subprocess.CompletedProcess:
-    """
-    Exécute une commande système avec capture stdout/stderr.
-    """
+
     return subprocess.run(
         command,
         stdout=subprocess.PIPE,
@@ -204,20 +205,17 @@ def run_command(
 
 
 def ensure_ffmpeg() -> None:
-    """
-    Vérifie que FFmpeg et FFprobe sont disponibles.
-    """
-    ffmpeg = shutil.which("ffmpeg")
-    ffprobe = shutil.which("ffprobe")
 
-    if not ffmpeg:
+    if not shutil.which("ffmpeg"):
         raise RuntimeError(
-            "FFmpeg est introuvable. Vérifiez que ffmpeg est présent dans apt.txt."
+            "FFmpeg est introuvable. "
+            "Vérifiez que ffmpeg est présent dans apt.txt."
         )
 
-    if not ffprobe:
+    if not shutil.which("ffprobe"):
         raise RuntimeError(
-            "FFprobe est introuvable. Vérifiez l'installation de FFmpeg."
+            "FFprobe est introuvable. "
+            "Vérifiez l'installation de FFmpeg."
         )
 
 
@@ -225,40 +223,96 @@ def ensure_ffmpeg() -> None:
 # OPENROUTER
 # ============================================================
 
+def _extract_openrouter_error(
+    response: requests.Response,
+) -> str:
+
+    try:
+        data = response.json()
+
+        if isinstance(data, dict):
+
+            error = data.get("error")
+
+            if isinstance(error, dict):
+
+                message = error.get("message")
+
+                if message:
+                    return str(message)
+
+            message = data.get("message")
+
+            if message:
+                return str(message)
+
+    except Exception:
+        pass
+
+    text = response.text.strip()
+
+    if text:
+        return text[:500]
+
+    return "Erreur inconnue."
+
+
+def _get_retry_after(
+    response: requests.Response,
+) -> Optional[float]:
+
+    value = response.headers.get(
+        "Retry-After"
+    )
+
+    if not value:
+        return None
+
+    try:
+        return float(value)
+
+    except (ValueError, TypeError):
+        return None
+
+
 def openrouter_request(
     messages: List[Dict[str, str]],
     temperature: float = 0.7,
     max_tokens: int = 1800,
-    timeout: int = 90,
-    max_retries: int = 2,
+    timeout: int = 75,
+    max_retries: int = 1,
 ) -> str:
     """
-    Appel robuste à OpenRouter.
+    Appel OpenRouter avec protection contre les erreurs
+    temporaires et les 429.
 
-    Améliorations :
-    - fallback entre modèles
-    - gestion explicite du 429
-    - respect limité de Retry-After
-    - timeout borné
-    - pas de boucle de retry interminable
-    - affichage clair de l'état dans Streamlit
+    OpenRouter gère déjà le fallback entre fournisseurs
+    et peut utiliser plusieurs modèles grâce à `models`.
     """
 
     if not OPENROUTER_API_KEY:
+
         raise RuntimeError(
             "OPENROUTER_API_KEY est introuvable. "
             "Ajoutez-la dans les secrets Render."
         )
 
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": (
+            f"Bearer {OPENROUTER_API_KEY}"
+        ),
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://shorts-viraux-1.onrender.com",
+        "HTTP-Referer": (
+            "https://shorts-viraux-1.onrender.com"
+        ),
         "X-Title": APP_TITLE,
     }
 
-    # On laisse OpenRouter gérer le fallback entre modèles.
-    models = list(dict.fromkeys(OPENROUTER_FALLBACK_MODELS))
+    models = list(
+        dict.fromkeys(
+            OPENROUTER_FALLBACK_MODELS
+        )
+    )
 
     payload = {
         "model": OPENROUTER_MODEL,
@@ -273,17 +327,30 @@ def openrouter_request(
 
     last_error = None
 
-    for attempt in range(max_retries + 1):
+    total_attempts = max(
+        1,
+        int(max_retries) + 1,
+    )
+
+    for attempt in range(total_attempts):
+
+        if attempt > 0:
+
+            wait_time = min(
+                2 + attempt * 2,
+                6,
+            )
+
+            st.info(
+                "Nouvelle tentative OpenRouter "
+                f"dans {wait_time} seconde(s)..."
+            )
+
+            time.sleep(
+                wait_time
+            )
 
         try:
-            if attempt > 0:
-                wait_time = min(4 * attempt, 8)
-
-                st.info(
-                    f"Nouvelle tentative OpenRouter dans {wait_time} seconde(s)..."
-                )
-
-                time.sleep(wait_time)
 
             response = requests.post(
                 OPENROUTER_URL,
@@ -293,30 +360,38 @@ def openrouter_request(
             )
 
         except requests.Timeout as exc:
+
             last_error = (
-                "OpenRouter a dépassé le délai d'attente "
-                f"de {timeout} secondes."
+                f"OpenRouter n'a pas répondu dans "
+                f"le délai de {timeout} secondes."
             )
 
-            if attempt >= max_retries:
-                raise RuntimeError(last_error) from exc
+            if attempt + 1 >= total_attempts:
+                raise RuntimeError(
+                    last_error
+                ) from exc
 
             st.warning(
-                "OpenRouter met trop de temps à répondre. "
-                "Nouvelle tentative..."
+                "OpenRouter met trop de temps "
+                "à répondre. Nouvelle tentative."
             )
 
             continue
 
         except requests.RequestException as exc:
-            last_error = f"Erreur réseau OpenRouter : {exc}"
 
-            if attempt >= max_retries:
-                raise RuntimeError(last_error) from exc
+            last_error = (
+                f"Erreur réseau OpenRouter : {exc}"
+            )
+
+            if attempt + 1 >= total_attempts:
+                raise RuntimeError(
+                    last_error
+                ) from exc
 
             st.warning(
-                "Connexion à OpenRouter interrompue. "
-                "Nouvelle tentative..."
+                "La connexion à OpenRouter a été "
+                "interrompue. Nouvelle tentative."
             )
 
             continue
@@ -329,29 +404,48 @@ def openrouter_request(
 
             try:
                 data = response.json()
+
             except Exception as exc:
+
                 raise RuntimeError(
-                    "OpenRouter a répondu avec un contenu JSON invalide."
+                    "OpenRouter a renvoyé un JSON invalide."
                 ) from exc
 
             try:
-                content = data["choices"][0]["message"]["content"]
-            except (KeyError, IndexError, TypeError) as exc:
-                raise RuntimeError(
-                    "Réponse OpenRouter invalide : contenu introuvable."
-                ) from exc
 
-            content = clean_ai_text(content)
-
-            if not content:
-                raise RuntimeError(
-                    "OpenRouter a répondu sans contenu exploitable."
+                content = (
+                    data["choices"][0]
+                    ["message"]["content"]
                 )
 
-            # Permet de savoir quel modèle a finalement répondu.
-            used_model = data.get("model")
+            except (
+                KeyError,
+                IndexError,
+                TypeError,
+            ) as exc:
+
+                raise RuntimeError(
+                    "Réponse OpenRouter invalide : "
+                    "contenu introuvable."
+                ) from exc
+
+            content = clean_ai_text(
+                content
+            )
+
+            if not content:
+
+                raise RuntimeError(
+                    "OpenRouter a répondu sans "
+                    "contenu exploitable."
+                )
+
+            used_model = data.get(
+                "model"
+            )
 
             if used_model:
+
                 st.caption(
                     f"Modèle IA utilisé : {used_model}"
                 )
@@ -359,103 +453,102 @@ def openrouter_request(
             return content
 
         # ----------------------------------------------------
-        # RATE LIMIT 429
+        # 429
         # ----------------------------------------------------
 
         if response.status_code == 429:
 
-            retry_after_header = response.headers.get("Retry-After")
-
-            retry_after = None
-
-            if retry_after_header:
-                try:
-                    retry_after = float(retry_after_header)
-                except (ValueError, TypeError):
-                    retry_after = None
-
-            # On ne laisse jamais l'application dormir plusieurs minutes.
-            if retry_after is not None:
-                wait_time = min(max(retry_after, 1), 10)
-            else:
-                wait_time = min(3 * (attempt + 1), 8)
-
-            try:
-                error_data = response.json()
-                error_message = (
-                    error_data.get("error", {}).get("message")
-                    if isinstance(error_data, dict)
-                    else None
+            error_message = (
+                _extract_openrouter_error(
+                    response
                 )
-            except Exception:
-                error_message = None
-
-            last_error = (
-                "OpenRouter a retourné une erreur 429 "
-                "(Too Many Requests)."
             )
 
-            if error_message:
-                last_error += f" {error_message}"
+            retry_after = _get_retry_after(
+                response
+            )
 
-            if attempt < max_retries:
-                st.warning(
-                    "OpenRouter limite temporairement la requête (429). "
-                    f"Nouvelle tentative dans {wait_time:.0f} seconde(s)."
+            if retry_after is not None:
+
+                wait_time = min(
+                    max(retry_after, 1),
+                    8,
                 )
 
-                time.sleep(wait_time)
+            else:
+
+                wait_time = min(
+                    2 + attempt * 2,
+                    6,
+                )
+
+            last_error = (
+                "OpenRouter a retourné HTTP 429 "
+                "(Too Many Requests). "
+                f"{error_message}"
+            )
+
+            if attempt + 1 < total_attempts:
+
+                st.warning(
+                    "OpenRouter limite temporairement "
+                    "la requête (429). "
+                    f"Nouvelle tentative dans "
+                    f"{wait_time:.0f} seconde(s)."
+                )
+
+                time.sleep(
+                    wait_time
+                )
+
                 continue
 
             raise RuntimeError(
                 last_error
-                + " Les tentatives ont été limitées pour éviter "
-                  "un blocage prolongé de la génération."
+                + " La génération est arrêtée "
+                  "plutôt que de rester bloquée."
             )
 
         # ----------------------------------------------------
         # AUTRES ERREURS HTTP
         # ----------------------------------------------------
 
-        try:
-            error_data = response.json()
-
-            if isinstance(error_data, dict):
-                error_message = (
-                    error_data.get("error", {}).get("message")
-                    or error_data.get("message")
-                )
-            else:
-                error_message = None
-
-        except Exception:
-            error_message = None
-
-        if not error_message:
-            error_message = response.text[:500]
+        error_message = (
+            _extract_openrouter_error(
+                response
+            )
+        )
 
         last_error = (
-            f"Erreur OpenRouter HTTP {response.status_code} : "
+            f"Erreur OpenRouter HTTP "
+            f"{response.status_code} : "
             f"{error_message}"
         )
 
-        # Les erreurs 4xx classiques ne doivent pas être répétées
-        # inutilement, sauf 429 traité ci-dessus.
         if 400 <= response.status_code < 500:
-            raise RuntimeError(last_error)
 
-        # Les erreurs 5xx peuvent être temporaires.
-        if attempt < max_retries:
-            st.warning(
-                f"OpenRouter a rencontré une erreur serveur "
-                f"({response.status_code}). Nouvelle tentative..."
+            raise RuntimeError(
+                last_error
             )
+
+        if attempt + 1 < total_attempts:
+
+            st.warning(
+                f"OpenRouter a rencontré une "
+                f"erreur serveur "
+                f"({response.status_code}). "
+                "Nouvelle tentative."
+            )
+
             continue
 
-        raise RuntimeError(last_error)
+        raise RuntimeError(
+            last_error
+        )
 
     raise RuntimeError(
-        last_error or "Erreur inconnue lors de l'appel à OpenRouter."
+        last_error
+        or "Erreur inconnue OpenRouter."
     )
 
 
@@ -463,52 +556,58 @@ def openrouter_request(
 # GÉNÉRATION DU SCRIPT PRINCIPAL
 # ============================================================
 
-def generate_main_script(topic: str) -> str:
-    """
-    Génère le script principal à partir du sujet.
+def generate_main_script(
+    topic: str,
+) -> str:
 
-    Le contenu doit rester factuel, accessible et captivant.
-    """
-
-    topic = normalize_text(topic)
+    topic = normalize_text(
+        topic
+    )
 
     if not topic:
-        raise ValueError("Le sujet est vide.")
+
+        raise ValueError(
+            "Le sujet est vide."
+        )
 
     prompt = f"""
 Vous êtes un scénariste spécialisé en psychologie,
 neurosciences accessibles et comportement humain.
 
-Sujet :
+SUJET :
 {topic}
 
 Écrivez un script captivant destiné à une vidéo YouTube.
 
 RÈGLES ABSOLUES :
 
-1. Utilisez uniquement des informations scientifiquement plausibles
-   et ne présentez jamais une invention comme un fait.
+1. Utilisez uniquement des informations
+   scientifiquement plausibles.
 
-2. N'inventez aucune étude, expérience, citation, statistique,
-   nom de chercheur ou résultat scientifique.
+2. N'inventez aucune étude, expérience,
+   citation, statistique, nom de chercheur
+   ou résultat scientifique.
 
-3. Si une affirmation est incertaine ou trop controversée,
-   reformulez-la prudemment.
+3. Si une affirmation est incertaine,
+   controversée ou dépend du contexte,
+   formulez-la prudemment.
 
-4. Le début doit créer immédiatement de la curiosité.
+4. Le début doit créer immédiatement
+   de la curiosité.
 
 5. Expliquez les mécanismes avec des mots simples.
 
 6. Évitez le jargon inutile.
 
-7. Le ton doit être naturel, dynamique et humain.
+7. Le ton doit être naturel, dynamique
+   et humain.
 
-8. Le script doit fonctionner avec une narration vocale.
+8. Le texte doit fonctionner avec
+   une narration vocale.
 
 9. Utilisez des paragraphes courts.
 
-10. Ajoutez des marqueurs visuels lorsque cela peut aider,
-    sous cette forme :
+10. Ajoutez des marqueurs visuels utiles :
 
 [IMAGE: description précise]
 
@@ -516,18 +615,18 @@ ou :
 
 [VISUAL: description précise]
 
-11. Les marqueurs doivent correspondre à de vrais éléments
-    que l'on pourrait illustrer.
+11. Les marqueurs doivent correspondre
+    à de vrais éléments illustrables.
 
-12. N'écrivez aucune introduction du type
-    "Bonjour et bienvenue sur ma chaîne".
+12. N'écrivez pas "Bonjour et bienvenue".
 
-13. Ne donnez pas de conclusion artificiellement longue.
+13. Évitez les conclusions artificiellement longues.
 
 14. Terminez avec une idée mémorable.
 
-Le script doit être suffisamment développé pour pouvoir être
-adapté intelligemment en vidéo longue ou en Short selon sa longueur.
+Le script doit être suffisamment développé
+pour pouvoir être adapté intelligemment en
+vidéo longue ou en Short selon sa longueur.
 
 Retournez uniquement le script.
 """
@@ -536,8 +635,9 @@ Retournez uniquement le script.
         {
             "role": "system",
             "content": (
-                "Vous êtes un scénariste scientifique précis. "
-                "Vous ne devez jamais inventer de faits."
+                "Vous êtes un scénariste scientifique "
+                "précis. Vous ne devez jamais inventer "
+                "de faits."
             ),
         },
         {
@@ -550,68 +650,69 @@ Retournez uniquement le script.
         messages=messages,
         temperature=0.65,
         max_tokens=2200,
-        timeout=90,
-        max_retries=2,
+        timeout=75,
+        max_retries=1,
     )
 
 
 # ============================================================
-# CHOIX DU MODE DE CONTENU
+# CHOIX DU FORMAT
 # ============================================================
 
-def choose_content_mode(word_count: int) -> str:
-    """
-    Détermine le meilleur format selon la longueur.
-
-    IMPORTANT :
-    la longueur ne provoque jamais une erreur à elle seule.
-    """
+def choose_content_mode(
+    word_count: int,
+) -> str:
 
     if word_count < REGENERATE_BELOW:
         return "regenerate"
 
-    if ONE_SHORT_MIN <= word_count <= ONE_SHORT_MAX:
+    if (
+        ONE_SHORT_MIN
+        <= word_count
+        <= ONE_SHORT_MAX
+    ):
         return "one_short"
 
-    if TWO_SHORTS_MIN <= word_count <= TWO_SHORTS_MAX:
+    if (
+        TWO_SHORTS_MIN
+        <= word_count
+        <= TWO_SHORTS_MAX
+    ):
         return "two_shorts"
 
     if word_count >= LONG_MIN:
         return "long"
 
-    # Cas intermédiaire.
-    # On privilégie l'adaptation plutôt que le rejet.
     return "one_short"
 
 
 # ============================================================
-# RÉÉCRITURE POUR UN FORMAT COURT
+# RÉGÉNÉRATION D'UN SCRIPT COURT
 # ============================================================
 
-def regenerate_short_main_script(topic: str) -> str:
-    """
-    Si le premier script est beaucoup trop court,
-    on demande une nouvelle version mieux adaptée au Short.
-    """
+def regenerate_short_main_script(
+    topic: str,
+) -> str:
 
     prompt = f"""
-Transformez le sujet suivant en un script de Short YouTube
-sur la psychologie, le cerveau ou le comportement humain.
+Transformez le sujet suivant en un script
+de Short YouTube sur la psychologie,
+les neurosciences ou le comportement humain.
 
-Sujet :
+SUJET :
 {topic}
 
 Contraintes :
 
+- accroche forte dès la première phrase
 - narration naturelle
-- accroche très forte dès la première phrase
 - explication scientifique accessible
 - aucune invention
 - aucune fausse statistique
 - aucune étude inventée
 - environ 90 à 130 mots
 - conclusion mémorable
-- texte directement utilisable par une voix off
+- texte directement utilisable en voix off
 
 Retournez uniquement le script.
 """
@@ -634,8 +735,8 @@ Retournez uniquement le script.
         messages=messages,
         temperature=0.7,
         max_tokens=700,
-        timeout=75,
-        max_retries=2,
+        timeout=60,
+        max_retries=1,
     )
 
 
@@ -645,36 +746,41 @@ Retournez uniquement le script.
 
 def generate_one_short(
     script: str,
-    topic: str = ""
+    topic: str = "",
 ) -> str:
-    """
-    Transforme un script en un Short cohérent.
 
-    Si le script est déjà utilisable, on évite un appel IA
-    supplémentaire.
-    """
+    script = clean_ai_text(
+        script
+    )
 
-    script = clean_ai_text(script)
-
-    word_count = count_words(script)
+    word_count = count_words(
+        script
+    )
 
     if word_count == 0:
-        raise RuntimeError("Impossible de créer un Short à partir d'un script vide.")
 
-    # Si le script est déjà dans une taille raisonnable,
-    # aucune réécriture supplémentaire n'est nécessaire.
-    if SHORT_MIN_WORDS <= word_count <= SHORT_MAX_WORDS:
+        raise RuntimeError(
+            "Impossible de créer un Short "
+            "à partir d'un script vide."
+        )
+
+    if (
+        SHORT_MIN_WORDS
+        <= word_count
+        <= SHORT_MAX_WORDS
+    ):
+
         return script
 
-    # Si le script est trop court, adaptation IA.
     if word_count < SHORT_MIN_WORDS:
 
         if topic:
-            return regenerate_short_main_script(topic)
+            return regenerate_short_main_script(
+                topic
+            )
 
         return script
 
-    # Si le script est trop long, on le restructure.
     return fit_short_script(
         script,
         part_label="Short",
@@ -687,21 +793,20 @@ def generate_one_short(
 # GÉNÉRATION DE DEUX SHORTS
 # ============================================================
 
-def generate_two_shorts(script: str, topic: str) -> Tuple[str, str]:
-    """
-    Divise un script relativement long en deux Shorts cohérents.
+def generate_two_shorts(
+    script: str,
+    topic: str,
+) -> Tuple[str, str]:
 
-    L'objectif est de faire UN appel de restructuration,
-    puis de laisser le montage adapter les longueurs finales.
-    """
-
-    script = clean_ai_text(script)
+    script = clean_ai_text(
+        script
+    )
 
     if count_words(script) < 2:
         return script, ""
 
     prompt = f"""
-Vous devez transformer ce script en DEUX Shorts YouTube
+Transformez ce script en DEUX Shorts YouTube
 sur la psychologie, le cerveau ou le comportement humain.
 
 SUJET :
@@ -715,31 +820,29 @@ OBJECTIF :
 Créer deux parties autonomes et cohérentes.
 
 PARTIE 1 :
-- doit avoir une accroche forte
-- introduit le phénomène
-- développe la première idée importante
-- doit donner envie de comprendre la suite
+- accroche forte
+- introduction du phénomène
+- première idée importante
+- envie de connaître la suite
 
 PARTIE 2 :
-- doit reprendre naturellement le sujet
-- développe la suite de l'explication
-- apporte une conclusion satisfaisante
+- reprise naturelle du sujet
+- suite de l'explication
+- conclusion satisfaisante
 
 RÈGLES :
 
 - ne jamais inventer de faits
 - ne jamais inventer d'études
-- ne pas ajouter de statistiques non présentes
-  dans le script original
+- ne pas ajouter de statistiques absentes
 - conserver les informations essentielles
 - phrases naturelles pour une narration vocale
 - pas d'introduction inutile
 - pas de remplissage
 - chaque partie doit pouvoir fonctionner seule
+- conserver ou déplacer les marqueurs visuels
 
-Vous pouvez conserver ou déplacer les marqueurs visuels.
-
-Retournez exactement ce format :
+Retournez exactement :
 
 [PARTIE 1]
 texte
@@ -752,8 +855,9 @@ texte
         {
             "role": "system",
             "content": (
-                "Vous êtes un monteur éditorial spécialisé "
-                "dans les vidéos courtes scientifiques."
+                "Vous êtes un monteur éditorial "
+                "spécialisé dans les vidéos "
+                "scientifiques courtes."
             ),
         },
         {
@@ -766,8 +870,8 @@ texte
         messages=messages,
         temperature=0.55,
         max_tokens=1800,
-        timeout=90,
-        max_retries=2,
+        timeout=75,
+        max_retries=1,
     )
 
     match1 = re.search(
@@ -782,30 +886,37 @@ texte
         flags=re.I | re.S,
     )
 
-    if match1:
-        part1 = clean_ai_text(match1.group(1))
-    else:
-        part1 = ""
+    part1 = (
+        clean_ai_text(match1.group(1))
+        if match1
+        else ""
+    )
 
-    if match2:
-        part2 = clean_ai_text(match2.group(1))
-    else:
-        part2 = ""
+    part2 = (
+        clean_ai_text(match2.group(1))
+        if match2
+        else ""
+    )
 
-    # Sécurité supplémentaire.
-    # Si le modèle n'a pas respecté le format,
-    # on coupe localement le script en deux.
     if not part1 or not part2:
 
         words = script.split()
 
-        middle = max(1, len(words) // 2)
+        middle = max(
+            1,
+            len(words) // 2,
+        )
 
-        part1 = " ".join(words[:middle]).strip()
-        part2 = " ".join(words[middle:]).strip()
+        part1 = " ".join(
+            words[:middle]
+        ).strip()
+
+        part2 = " ".join(
+            words[middle:]
+        ).strip()
 
     return part1, part2# ============================================================
-# ADAPTATION INTELLIGENTE D'UN SCRIPT POUR UN SHORT
+# ADAPTATION INTELLIGENTE D'UN SHORT
 # ============================================================
 
 def fit_short_script(
@@ -814,47 +925,30 @@ def fit_short_script(
     target_min: int = SHORT_MIN_WORDS,
     target_max: int = SHORT_MAX_WORDS,
 ) -> str:
-    """
-    Adapte un texte pour un Short.
 
-    Principe important :
-    la longueur n'est jamais considérée comme une erreur fatale.
-
-    Si le texte est déjà exploitable, on le conserve.
-    S'il est trop long, on demande une compression à l'IA.
-    S'il est trop court, on le conserve plutôt que de provoquer
-    une nouvelle cascade d'appels API.
-    """
-
-    script = clean_ai_text(script)
+    script = clean_ai_text(
+        script
+    )
 
     if not script:
         return ""
 
-    word_count = count_words(script)
+    word_count = count_words(
+        script
+    )
 
-    # --------------------------------------------------------
-    # TEXTE DÉJÀ DANS LA BONNE ZONE
-    # --------------------------------------------------------
-
-    if target_min <= word_count <= target_max:
+    if (
+        target_min
+        <= word_count
+        <= target_max
+    ):
         return script
 
-    # --------------------------------------------------------
-    # TEXTE COURT
-    # --------------------------------------------------------
-    # On ne force PAS l'IA à inventer du contenu pour atteindre
-    # artificiellement un nombre de mots.
-    #
-    # Le montage pourra adapter la durée avec la narration.
-    # Cela évite également un appel OpenRouter supplémentaire.
-
+    # Un texte court reste utilisable.
+    # On ne demande pas à l'IA d'inventer
+    # artificiellement des informations.
     if word_count < target_min:
         return script
-
-    # --------------------------------------------------------
-    # TEXTE TROP LONG
-    # --------------------------------------------------------
 
     prompt = f"""
 Adaptez le texte suivant pour un {part_label} YouTube.
@@ -870,22 +964,20 @@ RÈGLES :
 
 - conserver les informations essentielles
 - ne rien inventer
-- ne créer aucune nouvelle statistique
-- ne créer aucune étude
-- ne pas ajouter de faits absents du texte
+- aucune nouvelle statistique
+- aucune nouvelle étude
+- aucun nouveau fait
 - conserver le sens scientifique
-- commencer par une accroche forte
-- garder uniquement les éléments utiles
-- phrases courtes et naturelles
+- accroche forte
+- phrases courtes
 - narration fluide
 - terminer avec une idée mémorable
 - conserver les marqueurs [IMAGE:] ou [VISUAL:]
   lorsqu'ils restent pertinents
 
-IMPORTANT :
-Si atteindre exactement la plage demandée oblige à supprimer
-une information importante, privilégiez la qualité et le sens
-plutôt que le nombre exact de mots.
+Si atteindre exactement la plage demandée
+oblige à supprimer une information importante,
+privilégiez la qualité.
 
 Retournez uniquement le texte final.
 """
@@ -894,9 +986,9 @@ Retournez uniquement le texte final.
         {
             "role": "system",
             "content": (
-                "Vous êtes un éditeur de scripts scientifiques. "
-                "Vous réduisez les textes sans inventer "
-                "d'informations."
+                "Vous êtes un éditeur de scripts "
+                "scientifiques. Vous réduisez les textes "
+                "sans inventer d'informations."
             ),
         },
         {
@@ -906,59 +998,67 @@ Retournez uniquement le texte final.
     ]
 
     try:
+
         result = openrouter_request(
             messages=messages,
             temperature=0.45,
             max_tokens=900,
-            timeout=75,
-            max_retries=1,
+            timeout=60,
+            max_retries=0,
         )
 
-        result = clean_ai_text(result)
+        result = clean_ai_text(
+            result
+        )
 
         if result:
             return result
 
-    except Exception as exc:
-        # Une adaptation ratée ne doit pas faire échouer
-        # toute la production.
+    except Exception:
+
         st.warning(
-            f"{part_label} : adaptation IA indisponible. "
-            "Le texte original sera utilisé."
+            f"{part_label} : adaptation IA "
+            "indisponible. Le texte original "
+            "sera utilisé."
         )
 
     return script
 
 
 # ============================================================
-# GÉNÉRATION D'UN TEASER
+# TEASER
 # ============================================================
 
-def generate_teaser(script: str, topic: str = "") -> str:
-    """
-    Génère une version teaser courte à partir d'un script existant.
+def generate_teaser(
+    script: str,
+    topic: str = "",
+) -> str:
 
-    Le teaser est conçu pour être utilisé comme Short promotionnel.
-    """
-
-    script = clean_ai_text(script)
+    script = clean_ai_text(
+        script
+    )
 
     if not script:
         return ""
 
-    # Si le script est déjà court, on peut directement l'utiliser.
-    word_count = count_words(script)
+    word_count = count_words(
+        script
+    )
 
-    if SHORT_MIN_WORDS <= word_count <= SHORT_MAX_WORDS:
+    if (
+        SHORT_MIN_WORDS
+        <= word_count
+        <= SHORT_MAX_WORDS
+    ):
         return script
 
     prompt = f"""
-Créez un teaser très captivant pour une vidéo YouTube.
+Créez un teaser captivant pour une vidéo YouTube.
 
-Sujet :
+SUJET :
 {topic}
 
-Script source :
+SCRIPT SOURCE :
 {script}
 
 Le teaser doit :
@@ -972,9 +1072,9 @@ Le teaser doit :
 - ne pas exagérer les résultats scientifiques
 - être naturel à l'oral
 - faire environ 60 à 100 mots
-- finir sur une phrase qui donne envie de regarder la suite
+- finir sur une phrase donnant envie de regarder la suite
 
-Retournez uniquement le texte du teaser.
+Retournez uniquement le texte.
 """
 
     messages = [
@@ -992,25 +1092,22 @@ Retournez uniquement le texte du teaser.
     ]
 
     try:
+
         return openrouter_request(
             messages=messages,
             temperature=0.7,
             max_tokens=600,
-            timeout=75,
-            max_retries=1,
+            timeout=60,
+            max_retries=0,
         )
 
     except Exception:
-        # Si l'API rencontre un problème, le teaser peut être
-        # créé localement à partir du début du script.
+
         words = script.split()
 
-        fallback_words = words[:90]
-
-        if not fallback_words:
-            return script
-
-        fallback = " ".join(fallback_words).strip()
+        fallback = " ".join(
+            words[:90]
+        ).strip()
 
         return fallback
 
@@ -1025,43 +1122,56 @@ IMAGE_MARKER_RE = re.compile(
 )
 
 
-def extract_visual_markers(text: str) -> List[str]:
-    """
-    Extrait les descriptions présentes dans :
-
-    [IMAGE: ...]
-    [VISUAL: ...]
-    """
+def extract_visual_markers(
+    text: str,
+) -> List[str]:
 
     if not text:
         return []
 
-    markers = IMAGE_MARKER_RE.findall(text)
+    markers = IMAGE_MARKER_RE.findall(
+        text
+    )
 
     cleaned = []
 
     for marker in markers:
-        marker = normalize_text(marker)
+
+        marker = normalize_text(
+            marker
+        )
 
         if marker:
-            cleaned.append(marker)
+            cleaned.append(
+                marker
+            )
 
     return cleaned
 
 
-def remove_visual_markers(text: str) -> str:
-    """
-    Retire les marqueurs visuels du texte destiné à la narration.
-    """
+def remove_visual_markers(
+    text: str,
+) -> str:
 
     if not text:
         return ""
 
-    text = IMAGE_MARKER_RE.sub(" ", text)
+    text = IMAGE_MARKER_RE.sub(
+        " ",
+        text,
+    )
 
-    # Nettoyage des espaces créés par la suppression.
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(
+        r"[ \t]+",
+        " ",
+        text,
+    )
+
+    text = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        text,
+    )
 
     return text.strip()
 
@@ -1074,14 +1184,13 @@ def pexels_search(
     query: str,
     per_page: int = 8,
 ) -> List[dict]:
-    """
-    Recherche des photos sur Pexels.
-    """
 
     if not PEXELS_API_KEY:
         return []
 
-    query = normalize_text(query)
+    query = normalize_text(
+        query
+    )
 
     if not query:
         return []
@@ -1097,6 +1206,7 @@ def pexels_search(
     }
 
     try:
+
         response = requests.get(
             PEXELS_SEARCH_URL,
             headers=headers,
@@ -1109,9 +1219,15 @@ def pexels_search(
 
         data = response.json()
 
-        photos = data.get("photos", [])
+        photos = data.get(
+            "photos",
+            [],
+        )
 
-        if not isinstance(photos, list):
+        if not isinstance(
+            photos,
+            list,
+        ):
             return []
 
         return photos
@@ -1125,11 +1241,9 @@ def download_file(
     destination: Path,
     timeout: int = 30,
 ) -> bool:
-    """
-    Télécharge un fichier distant.
-    """
 
     try:
+
         response = requests.get(
             url,
             timeout=timeout,
@@ -1144,12 +1258,22 @@ def download_file(
             exist_ok=True,
         )
 
-        with open(destination, "wb") as file:
-            for chunk in response.iter_content(chunk_size=1024 * 128):
+        with open(
+            destination,
+            "wb",
+        ) as file:
+
+            for chunk in response.iter_content(
+                chunk_size=1024 * 128
+            ):
+
                 if chunk:
                     file.write(chunk)
 
-        return destination.exists() and destination.stat().st_size > 0
+        return (
+            destination.exists()
+            and destination.stat().st_size > 0
+        )
 
     except Exception:
         return False
@@ -1161,35 +1285,58 @@ def normalize_image(
     width: int = 1920,
     height: int = 1080,
 ) -> bool:
-    """
-    Convertit une image en image JPEG standardisée.
-    """
 
     try:
+
         with Image.open(source) as image:
 
-            image = image.convert("RGB")
+            image = image.convert(
+                "RGB"
+            )
 
-            src_ratio = image.width / image.height
-            dst_ratio = width / height
+            src_ratio = (
+                image.width
+                / image.height
+            )
+
+            dst_ratio = (
+                width
+                / height
+            )
 
             if src_ratio > dst_ratio:
-                # Image trop large
+
                 new_height = height
-                new_width = int(height * src_ratio)
+
+                new_width = int(
+                    height * src_ratio
+                )
 
             else:
-                # Image trop haute
+
                 new_width = width
-                new_height = int(width / src_ratio)
+
+                new_height = int(
+                    width / src_ratio
+                )
 
             image = image.resize(
-                (new_width, new_height),
+                (
+                    new_width,
+                    new_height,
+                ),
                 Image.Resampling.LANCZOS,
             )
 
-            left = max(0, (new_width - width) // 2)
-            top = max(0, (new_height - height) // 2)
+            left = max(
+                0,
+                (new_width - width) // 2,
+            )
+
+            top = max(
+                0,
+                (new_height - height) // 2,
+            )
 
             image = image.crop(
                 (
@@ -1219,7 +1366,7 @@ def normalize_image(
 
 
 # ============================================================
-# PLACEHOLDER VISUEL
+# PLACEHOLDER
 # ============================================================
 
 def create_placeholder(
@@ -1228,10 +1375,6 @@ def create_placeholder(
     width: int = 1920,
     height: int = 1080,
 ) -> Path:
-    """
-    Crée un visuel de secours si aucune image pertinente
-    n'a été trouvée.
-    """
 
     image = Image.new(
         "RGB",
@@ -1239,9 +1382,10 @@ def create_placeholder(
         "black",
     )
 
-    draw = ImageDraw.Draw(image)
+    draw = ImageDraw.Draw(
+        image
+    )
 
-    # Police système si disponible.
     font = None
 
     possible_fonts = [
@@ -1250,22 +1394,28 @@ def create_placeholder(
     ]
 
     for font_path in possible_fonts:
+
         if Path(font_path).exists():
+
             try:
+
                 font = ImageFont.truetype(
                     font_path,
                     64,
                 )
+
                 break
+
             except Exception:
                 pass
 
     if font is None:
         font = ImageFont.load_default()
 
-    text = normalize_text(text)
+    text = normalize_text(
+        text
+    )
 
-    # Limitation de longueur du texte affiché.
     if len(text) > 120:
         text = text[:117] + "..."
 
@@ -1277,11 +1427,21 @@ def create_placeholder(
         align="center",
     )
 
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
+    text_width = (
+        bbox[2] - bbox[0]
+    )
 
-    x = (width - text_width) // 2
-    y = (height - text_height) // 2
+    text_height = (
+        bbox[3] - bbox[1]
+    )
+
+    x = (
+        width - text_width
+    ) // 2
+
+    y = (
+        height - text_height
+    ) // 2
 
     draw.multiline_text(
         (x, y),
@@ -1315,18 +1475,13 @@ def get_visuals(
     output_dir: Path,
     target_count: Optional[int] = None,
 ) -> List[Path]:
-    """
-    Récupère les visuels nécessaires à la vidéo.
 
-    Priorité :
-    1. marqueurs visuels du script
-    2. recherches Pexels
-    3. placeholders de secours
-    """
-
-    markers = extract_visual_markers(script)
+    markers = extract_visual_markers(
+        script
+    )
 
     if not markers:
+
         markers = [
             "psychology brain human behavior",
             "human brain neuroscience",
@@ -1334,10 +1489,19 @@ def get_visuals(
         ]
 
     if target_count is not None:
-        target_count = max(1, int(target_count))
+
+        target_count = max(
+            1,
+            int(target_count),
+        )
+
         markers = markers[:target_count]
 
-    visual_dir = output_dir / "visuals"
+    visual_dir = (
+        output_dir
+        / "visuals"
+    )
+
     visual_dir.mkdir(
         parents=True,
         exist_ok=True,
@@ -1347,20 +1511,25 @@ def get_visuals(
 
     used_queries = set()
 
-    for index, query in enumerate(markers):
+    for index, query in enumerate(
+        markers
+    ):
 
-        query = normalize_text(query)
+        query = normalize_text(
+            query
+        )
 
         if not query:
             continue
 
-        # Éviter les recherches strictement identiques.
         query_key = query.lower()
 
         if query_key in used_queries:
             continue
 
-        used_queries.add(query_key)
+        used_queries.add(
+            query_key
+        )
 
         photos = pexels_search(
             query=query,
@@ -1370,21 +1539,37 @@ def get_visuals(
         selected_photo = None
 
         if photos:
-            # Choix aléatoire parmi quelques résultats
-            # pour éviter que toutes les vidéos utilisent
-            # systématiquement la première image.
+
             selected_photo = random.choice(
-                photos[: min(len(photos), 5)]
+                photos[
+                    :min(
+                        len(photos),
+                        5,
+                    )
+                ]
             )
 
-        raw_path = visual_dir / f"raw_{index:03d}.jpg"
-        final_path = visual_dir / f"visual_{index:03d}.jpg"
+        raw_path = (
+            visual_dir
+            / f"raw_{index:03d}.jpg"
+        )
+
+        final_path = (
+            visual_dir
+            / f"visual_{index:03d}.jpg"
+        )
 
         if selected_photo:
 
             src = (
-                selected_photo.get("src", {})
-                if isinstance(selected_photo, dict)
+                selected_photo.get(
+                    "src",
+                    {},
+                )
+                if isinstance(
+                    selected_photo,
+                    dict,
+                )
                 else {}
             )
 
@@ -1399,38 +1584,43 @@ def get_visuals(
                 if download_file(
                     image_url,
                     raw_path,
-                    timeout=30,
                 ):
 
                     if normalize_image(
                         raw_path,
                         final_path,
                     ):
-                        visuals.append(final_path)
-                        continue
 
-        # ----------------------------------------------------
-        # SECOURS
-        # ----------------------------------------------------
+                        visuals.append(
+                            final_path
+                        )
+
+                        continue
 
         placeholder = create_placeholder(
             final_path,
             query,
         )
 
-        visuals.append(placeholder)
+        visuals.append(
+            placeholder
+        )
 
-    # Si aucune image n'a été récupérée.
     if not visuals:
 
-        fallback_path = visual_dir / "visual_fallback.jpg"
+        fallback_path = (
+            visual_dir
+            / "visual_fallback.jpg"
+        )
 
         create_placeholder(
             fallback_path,
             "Psychologie • Cerveau • Comportement",
         )
 
-        visuals.append(fallback_path)
+        visuals.append(
+            fallback_path
+        )
 
     return visuals
 
@@ -1439,23 +1629,19 @@ def get_visuals(
 # NOMBRE DE VISUELS
 # ============================================================
 
-def estimate_visual_count(duration_seconds: float) -> int:
-    """
-    Estime le nombre de visuels nécessaires.
-
-    On change régulièrement de visuel sans provoquer
-    un montage excessivement chargé.
-    """
+def estimate_visual_count(
+    duration_seconds: float,
+) -> int:
 
     duration_seconds = max(
         1.0,
         float(duration_seconds),
     )
 
-    # Environ un visuel toutes les 4 à 5 secondes.
-    count = math.ceil(duration_seconds / 4.5)
+    count = math.ceil(
+        duration_seconds / 4.5
+    )
 
-    # Limites raisonnables.
     return max(
         5,
         min(count, 24),
@@ -1463,46 +1649,58 @@ def estimate_visual_count(duration_seconds: float) -> int:
 
 
 # ============================================================
-# EDGE-TTS
+# EDGE-TTS : VOIX
 # ============================================================
 
 def list_tts_voices() -> List[dict]:
-    """
-    Récupère la liste des voix Edge-TTS.
-
-    Edge-TTS utilise de l'asyncio.
-    Cette fonction crée une boucle dédiée pour éviter
-    les problèmes de boucle déjà active dans Streamlit.
-    """
 
     async def _get_voices():
+
         return await edge_tts.list_voices()
 
     try:
-        return asyncio.run(_get_voices())
+
+        return asyncio.run(
+            _get_voices()
+        )
 
     except RuntimeError:
-        # Une boucle asyncio est déjà active.
+
         result = []
 
         def runner():
-            nonlocal result
 
-            loop = asyncio.new_event_loop()
+            loop = (
+                asyncio.new_event_loop()
+            )
 
             try:
-                asyncio.set_event_loop(loop)
-                result = loop.run_until_complete(
-                    _get_voices()
+
+                asyncio.set_event_loop(
+                    loop
                 )
+
+                result.extend(
+                    loop.run_until_complete(
+                        _get_voices()
+                    )
+                )
+
+            except Exception:
+                pass
+
             finally:
+
                 loop.close()
-                asyncio.set_event_loop(None)
+
+                asyncio.set_event_loop(
+                    None
+                )
 
         import threading
 
         thread = threading.Thread(
-            target=runner,
+            target=runner
         )
 
         thread.start()
@@ -1515,9 +1713,6 @@ def list_tts_voices() -> List[dict]:
 
 
 def select_french_voice() -> str:
-    """
-    Sélectionne une voix française disponible.
-    """
 
     preferred = [
         "fr-FR-DeniseNeural",
@@ -1527,215 +1722,62 @@ def select_french_voice() -> str:
     ]
 
     try:
+
         voices = list_tts_voices()
 
         available = {
-            str(v.get("ShortName"))
-            for v in voices
-            if isinstance(v, dict)
+            str(
+                voice.get(
+                    "ShortName"
+                )
+            )
+            for voice in voices
+            if isinstance(
+                voice,
+                dict,
+            )
         }
 
         for voice in preferred:
+
             if voice in available:
                 return voice
 
-        # Chercher n'importe quelle voix française.
         for voice in voices:
 
-            if not isinstance(voice, dict):
+            if not isinstance(
+                voice,
+                dict,
+            ):
                 continue
 
             short_name = str(
-                voice.get("ShortName", "")
-            )
-
-            locale = str(
-                voice.get("Locale", "")
-            )
-
-            if locale.lower().startswith("fr-"):
-                return short_name
-
-    except Exception:
-        pass
-
-    # Valeur de secours.
-    return "fr-FR-DeniseNeural"
-
-
-async def synthesize_with_voice_async(
-    text: str,
-    output_path: Path,
-    voice: str,
-) -> None:
-    """
-    Synthèse Edge-TTS asynchrone.
-    """
-
-    communicate = edge_tts.Communicate(
-        text=text,
-        voice=voice,
-        rate="+0%",
-        volume="+0%",
-    )
-
-    await communicate.save(
-        str(output_path),
-    )
-
-
-def synthesize_with_voice(
-    text: str,
-    output_path: Path,
-    voice: str,
-) -> None:
-    """
-    Lance Edge-TTS dans une boucle dédiée.
-    """
-
-    async def runner():
-        await synthesize_with_voice_async(
-            text,
-            output_path,
-            voice,
-        )
-
-    try:
-        asyncio.run(runner())
-
-    except RuntimeError:
-
-        result = {
-            "error": None,
-        }
-
-        def thread_runner():
-            loop = asyncio.new_event_loop()
-
-            try:
-                asyncio.set_event_loop(loop)
-
-                loop.run_until_complete(
-                    runner()
+                voice.get(
+                    "ShortName",
+                    "",
                 )
-
-            except Exception as exc:
-                result["error"] = exc
-
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-        import threading
-
-        thread = threading.Thread(
-            target=thread_runner,
-        )
-
-        thread.start()
-        thread.join()
-
-        if result["error"]:
-            raise result["error"]
-
-
-def get_audio_duration(audio_path: Path) -> float:
-    """
-    Récupère la durée d'un fichier audio avec FFprobe.
-    """
-
-    result = run_command(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(audio_path),
-        ],
-        timeout=30,
-    )
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            "Impossible de déterminer la durée audio."
-        )
-
-    try:
-        return float(result.stdout.strip())
-    except Exception as exc:
-        raise RuntimeError(
-            "Durée audio invalide."
-        ) from exc
-
-
-def generate_audio(
-    text: str,
-    output_path: Path,
-) -> Tuple[Path, float, str]:
-    """
-    Génère la narration audio et retourne :
-    chemin audio
-    durée
-    voix utilisée
-    """
-
-    text = remove_visual_markers(text)
-
-    if not text:
-        raise RuntimeError(
-            "Impossible de générer une narration à partir d'un texte vide."
-        )
-
-    voice = select_french_voice()
-
-    output_path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    synthesize_with_voice(
-        text=text,
-        output_path=output_path,
-        voice=voice,
-    )
-
-    if not output_path.exists():
-        raise RuntimeError(
-            "Edge-TTS n'a pas créé le fichier audio."
-        )
-
-    duration = get_audio_duration(
-        output_path,
-    )
-
-    if duration <= 0:
-        raise RuntimeError(
-            "La durée audio obtenue est invalide."
-        )
-
-    return output_path, duration, voiceshort_name = str(
-                voice.get("ShortName", "")
             )
 
             locale = str(
-                voice.get("Locale", "")
+                voice.get(
+                    "Locale",
+                    "",
+                )
             )
 
-            if locale.lower().startswith("fr-"):
+            if locale.lower().startswith(
+                "fr-"
+            ):
                 return short_name
 
     except Exception:
         pass
 
-    # Voix française par défaut.
     return "fr-FR-DeniseNeural"
 
 
 # ============================================================
-# SYNTHÈSE VOCALE
+# EDGE-TTS : SYNTHÈSE
 # ============================================================
 
 def synthesize_with_voice(
@@ -1745,16 +1787,20 @@ def synthesize_with_voice(
     rate: str = "+0%",
     volume: str = "+0%",
 ) -> Path:
-    """
-    Génère la narration avec Edge-TTS.
-    """
 
-    text = remove_visual_markers(text)
-    text = normalize_text(text)
+    text = remove_visual_markers(
+        text
+    )
+
+    text = normalize_text(
+        text
+    )
 
     if not text:
+
         raise RuntimeError(
-            "Impossible de générer l'audio : le texte est vide."
+            "Impossible de générer l'audio : "
+            "le texte est vide."
         )
 
     if voice is None:
@@ -1766,6 +1812,7 @@ def synthesize_with_voice(
     )
 
     async def _generate():
+
         communicate = edge_tts.Communicate(
             text=text,
             voice=voice,
@@ -1778,25 +1825,44 @@ def synthesize_with_voice(
         )
 
     try:
-        asyncio.run(_generate())
+
+        asyncio.run(
+            _generate()
+        )
 
     except RuntimeError:
-        # Gestion d'une éventuelle boucle asyncio active.
+
         error_holder = []
 
         def runner():
-            loop = asyncio.new_event_loop()
+
+            loop = (
+                asyncio.new_event_loop()
+            )
 
             try:
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(_generate())
+
+                asyncio.set_event_loop(
+                    loop
+                )
+
+                loop.run_until_complete(
+                    _generate()
+                )
 
             except Exception as exc:
-                error_holder.append(exc)
+
+                error_holder.append(
+                    exc
+                )
 
             finally:
+
                 loop.close()
-                asyncio.set_event_loop(None)
+
+                asyncio.set_event_loop(
+                    None
+                )
 
         import threading
 
@@ -1808,36 +1874,38 @@ def synthesize_with_voice(
         thread.join()
 
         if error_holder:
+
             raise RuntimeError(
-                f"Erreur Edge-TTS : {error_holder[0]}"
+                f"Erreur Edge-TTS : "
+                f"{error_holder[0]}"
             )
 
     except Exception as exc:
+
         raise RuntimeError(
-            f"Impossible de générer la narration : {exc}"
+            f"Impossible de générer la narration : "
+            f"{exc}"
         ) from exc
 
     if not output_path.exists():
+
         raise RuntimeError(
             "Edge-TTS n'a pas créé le fichier audio."
         )
 
     if output_path.stat().st_size == 0:
+
         raise RuntimeError(
             "Le fichier audio généré est vide."
         )
 
-    return output_path
-
-
-# ============================================================
+    return output_path# ============================================================
 # DURÉE AUDIO
 # ============================================================
 
-def get_audio_duration(audio_path: Path) -> float:
-    """
-    Retourne la durée audio en secondes grâce à FFprobe.
-    """
+def get_audio_duration(
+    audio_path: Path,
+) -> float:
 
     ensure_ffmpeg()
 
@@ -1856,21 +1924,27 @@ def get_audio_duration(audio_path: Path) -> float:
     )
 
     if result.returncode != 0:
+
         raise RuntimeError(
-            "Impossible de déterminer la durée de l'audio : "
+            "Impossible de déterminer la durée "
+            "de l'audio : "
             + result.stderr[:500]
         )
 
     try:
+
         duration = float(
             result.stdout.strip()
         )
+
     except ValueError as exc:
+
         raise RuntimeError(
             "Durée audio invalide."
         ) from exc
 
     if duration <= 0:
+
         raise RuntimeError(
             "La durée audio est nulle."
         )
@@ -1887,16 +1961,14 @@ def get_word_boundaries(
     audio_path: Path,
     voice: Optional[str] = None,
 ) -> List[Tuple[str, float, float]]:
-    """
-    Génère des timings mot par mot.
 
-    Edge-TTS peut fournir des événements WordBoundary.
-    Si ceux-ci ne sont pas disponibles, on utilise un timing
-    de secours calculé à partir de la durée réelle de l'audio.
-    """
+    text = remove_visual_markers(
+        text
+    )
 
-    text = remove_visual_markers(text)
-    text = normalize_text(text)
+    text = normalize_text(
+        text
+    )
 
     if not text:
         return []
@@ -1915,6 +1987,7 @@ def get_word_boundaries(
     boundaries = []
 
     async def _collect():
+
         communicate = edge_tts.Communicate(
             text=text,
             voice=voice,
@@ -1922,59 +1995,83 @@ def get_word_boundaries(
 
         async for event in communicate.stream():
 
-            if event["type"] == "WordBoundary":
+            if event["type"] != "WordBoundary":
+                continue
 
-                offset = event.get("offset", 0)
+            offset = event.get(
+                "offset",
+                0,
+            )
 
-                duration = event.get(
-                    "duration",
-                    0,
+            duration = event.get(
+                "duration",
+                0,
+            )
+
+            start = (
+                float(offset)
+                / 10_000_000
+            )
+
+            event_duration = (
+                float(duration)
+                / 10_000_000
+            )
+
+            word = str(
+                event.get(
+                    "text",
+                    "",
                 )
+            ).strip()
 
-                # Edge-TTS utilise des ticks de 100 ns.
-                start = float(offset) / 10_000_000
-                event_duration = float(duration) / 10_000_000
+            if word:
 
-                word = str(
-                    event.get("text", "")
-                ).strip()
-
-                if word:
-                    boundaries.append(
-                        (
-                            word,
-                            start,
-                            max(
-                                0.03,
-                                event_duration,
-                            ),
-                        )
+                boundaries.append(
+                    (
+                        word,
+                        start,
+                        max(
+                            0.03,
+                            event_duration,
+                        ),
                     )
+                )
 
     try:
-        asyncio.run(_collect())
+
+        asyncio.run(
+            _collect()
+        )
 
     except RuntimeError:
-        result_holder = []
 
         def runner():
-            loop = asyncio.new_event_loop()
+
+            loop = (
+                asyncio.new_event_loop()
+            )
 
             try:
-                asyncio.set_event_loop(loop)
+
+                asyncio.set_event_loop(
+                    loop
+                )
+
                 loop.run_until_complete(
                     _collect()
-                )
-                result_holder.extend(
-                    boundaries
                 )
 
             except Exception:
                 pass
 
             finally:
+
                 loop.close()
-                asyncio.set_event_loop(None)
+
+                asyncio.set_event_loop(
+                    None
+                )
 
         import threading
 
@@ -1986,30 +2083,38 @@ def get_word_boundaries(
         thread.join()
 
     except Exception:
+
         boundaries = []
 
-    # --------------------------------------------------------
-    # VÉRIFICATION DES DONNÉES EDGE-TTS
-    # --------------------------------------------------------
-
     if boundaries:
+
         duration = get_audio_duration(
             audio_path
         )
 
         cleaned = []
 
-        for index, item in enumerate(boundaries):
+        for index, item in enumerate(
+            boundaries
+        ):
 
             word, start, word_duration = item
 
             start = max(
                 0.0,
-                min(start, duration),
+                min(
+                    start,
+                    duration,
+                ),
             )
 
-            if index + 1 < len(boundaries):
-                next_start = boundaries[index + 1][1]
+            if index + 1 < len(
+                boundaries
+            ):
+
+                next_start = boundaries[
+                    index + 1
+                ][1]
 
                 end = min(
                     duration,
@@ -2020,6 +2125,7 @@ def get_word_boundaries(
                 )
 
             else:
+
                 end = min(
                     duration,
                     max(
@@ -2029,6 +2135,7 @@ def get_word_boundaries(
                 )
 
             if end > start:
+
                 cleaned.append(
                     (
                         word,
@@ -2048,13 +2155,14 @@ def get_word_boundaries(
         audio_path
     )
 
-    word_count = len(words)
+    word_count = len(
+        words
+    )
 
-    # Répartition pondérée approximative.
-    # Les mots plus longs reçoivent légèrement plus de temps.
     weights = []
 
     for word in words:
+
         clean_word = re.sub(
             r"[^\wÀ-ÿ'-]",
             "",
@@ -2068,16 +2176,23 @@ def get_word_boundaries(
             )
         )
 
-    total_weight = sum(weights)
+    total_weight = sum(
+        weights
+    )
 
     if total_weight <= 0:
-        total_weight = float(word_count)
+        total_weight = float(
+            word_count
+        )
 
     result = []
 
     current_time = 0.0
 
-    for word, weight in zip(words, weights):
+    for word, weight in zip(
+        words,
+        weights,
+    ):
 
         word_duration = (
             duration
@@ -2086,9 +2201,11 @@ def get_word_boundaries(
         )
 
         start = current_time
+
         end = min(
             duration,
-            current_time + word_duration,
+            current_time
+            + word_duration,
         )
 
         result.append(
@@ -2105,13 +2222,12 @@ def get_word_boundaries(
 
 
 # ============================================================
-# SOUS-TITRES ASS
+# ASS
 # ============================================================
 
-def ass_time(seconds: float) -> str:
-    """
-    Convertit des secondes vers HH:MM:SS.cc
-    """
+def ass_time(
+    seconds: float,
+) -> str:
 
     seconds = max(
         0.0,
@@ -2123,7 +2239,8 @@ def ass_time(seconds: float) -> str:
     )
 
     minutes = int(
-        (seconds % 3600) // 60
+        (seconds % 3600)
+        // 60
     )
 
     remaining = (
@@ -2137,20 +2254,26 @@ def ass_time(seconds: float) -> str:
 
     centiseconds = int(
         round(
-            (remaining - whole_seconds)
+            (
+                remaining
+                - whole_seconds
+            )
             * 100
         )
     )
 
     if centiseconds >= 100:
+
         whole_seconds += 1
         centiseconds -= 100
 
     if whole_seconds >= 60:
+
         minutes += 1
         whole_seconds -= 60
 
     if minutes >= 60:
+
         hours += 1
         minutes -= 60
 
@@ -2162,12 +2285,13 @@ def ass_time(seconds: float) -> str:
     )
 
 
-def escape_ass(text: str) -> str:
-    """
-    Échappe les caractères spéciaux ASS.
-    """
+def escape_ass(
+    text: str,
+) -> str:
 
-    text = str(text)
+    text = str(
+        text
+    )
 
     text = text.replace(
         "\\",
@@ -2198,24 +2322,19 @@ def create_ass_subtitles(
     width: int = 1080,
     height: int = 1920,
 ) -> Path:
-    """
-    Crée des sous-titres mot par mot.
-
-    Les sous-titres restent en bas de l'image.
-    Une seule unité de texte est affichée à la fois afin
-    de garder une lecture très claire.
-    """
 
     output_path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    # Taille de police adaptée au format.
     if height > width:
+
         font_size = 64
         margin_vertical = 145
+
     else:
+
         font_size = 52
         margin_vertical = 80
 
@@ -2227,11 +2346,13 @@ def create_ass_subtitles(
         "",
         "[V4+ Styles]",
         (
-            "Format: Name, Fontname, Fontsize, PrimaryColour, "
-            "SecondaryColour, OutlineColour, BackColour, "
-            "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, "
-            "Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
-            "MarginL, MarginR, MarginV, Encoding"
+            "Format: Name, Fontname, Fontsize, "
+            "PrimaryColour, SecondaryColour, "
+            "OutlineColour, BackColour, Bold, "
+            "Italic, Underline, StrikeOut, ScaleX, "
+            "ScaleY, Spacing, Angle, BorderStyle, "
+            "Outline, Shadow, Alignment, MarginL, "
+            "MarginR, MarginV, Encoding"
         ),
         (
             "Style: Default,Arial,"
@@ -2254,7 +2375,9 @@ def create_ass_subtitles(
 
     for word, start, end in boundaries:
 
-        word = escape_ass(word)
+        word = escape_ass(
+            word
+        )
 
         content.append(
             "Dialogue: 0,"
@@ -2280,9 +2403,6 @@ def distribute_scene_durations(
     total_duration: float,
     visual_count: int,
 ) -> List[float]:
-    """
-    Distribue la durée totale entre les visuels.
-    """
 
     total_duration = max(
         1.0,
@@ -2294,36 +2414,41 @@ def distribute_scene_durations(
         int(visual_count),
     )
 
-    base = total_duration / visual_count
+    base = (
+        total_duration
+        / visual_count
+    )
 
     durations = [
         base
         for _ in range(visual_count)
     ]
 
-    # Petit facteur de variation pour éviter
-    # une sensation trop mécanique.
     for index in range(
         visual_count
     ):
 
         variation = (
             0.94
-            + random.random() * 0.12
+            + random.random()
+            * 0.12
         )
 
-        durations[index] *= variation
+        durations[index] *= (
+            variation
+        )
 
-    # Normalisation pour retrouver exactement
-    # la durée totale.
     current_total = sum(
         durations
     )
 
     if current_total <= 0:
+
         return [
             base
-            for _ in range(visual_count)
+            for _ in range(
+                visual_count
+            )
         ]
 
     factor = (
@@ -2331,16 +2456,14 @@ def distribute_scene_durations(
         / current_total
     )
 
-    durations = [
+    return [
         value * factor
         for value in durations
     ]
 
-    return durations
-
 
 # ============================================================
-# CRÉATION D'UNE SCÈNE IMAGE → VIDÉO
+# IMAGE → VIDÉO
 # ============================================================
 
 def create_image_scene(
@@ -2351,12 +2474,6 @@ def create_image_scene(
     height: int,
     scene_index: int = 0,
 ) -> Path:
-    """
-    Transforme une image en courte scène vidéo avec
-    zoom/pan subtil.
-
-    Le mouvement évite l'effet diaporama complètement statique.
-    """
 
     ensure_ffmpeg()
 
@@ -2372,10 +2489,10 @@ def create_image_scene(
 
     fps = 30
 
-    # Mouvement légèrement différent selon la scène.
     mode = scene_index % 4
 
     if mode == 0:
+
         zoom_expr = (
             "min(zoom+0.0008,1.12)"
         )
@@ -2389,13 +2506,13 @@ def create_image_scene(
         )
 
     elif mode == 1:
+
         zoom_expr = (
             "min(zoom+0.00065,1.10)"
         )
 
         x_expr = (
-            "(iw-iw/zoom)*"
-            "0.25"
+            "(iw-iw/zoom)*0.25"
         )
 
         y_expr = (
@@ -2403,13 +2520,13 @@ def create_image_scene(
         )
 
     elif mode == 2:
+
         zoom_expr = (
             "min(zoom+0.0007,1.11)"
         )
 
         x_expr = (
-            "(iw-iw/zoom)*"
-            "0.75"
+            "(iw-iw/zoom)*0.75"
         )
 
         y_expr = (
@@ -2417,6 +2534,7 @@ def create_image_scene(
         )
 
     else:
+
         zoom_expr = (
             "min(zoom+0.0006,1.09)"
         )
@@ -2426,8 +2544,7 @@ def create_image_scene(
         )
 
         y_expr = (
-            "(ih-ih/zoom)*"
-            "0.35"
+            "(ih-ih/zoom)*0.35"
         )
 
     frames = max(
@@ -2482,12 +2599,14 @@ def create_image_scene(
     )
 
     if result.returncode != 0:
+
         raise RuntimeError(
             "Impossible de créer une scène vidéo : "
             + result.stderr[-1000:]
         )
 
     if not output_path.exists():
+
         raise RuntimeError(
             "FFmpeg n'a pas créé la scène vidéo."
         )
@@ -2496,20 +2615,18 @@ def create_image_scene(
 
 
 # ============================================================
-# CONCATÉNATION DES SCÈNES
+# CONCATÉNATION
 # ============================================================
 
 def concat_scenes(
     scene_paths: List[Path],
     output_path: Path,
 ) -> Path:
-    """
-    Assemble les scènes vidéo.
-    """
 
     ensure_ffmpeg()
 
     if not scene_paths:
+
         raise RuntimeError(
             "Aucune scène à assembler."
         )
@@ -2533,10 +2650,11 @@ def concat_scenes(
             .as_posix()
         )
 
-        # Échappement simple pour le format concat FFmpeg.
         absolute_path = (
-            absolute_path
-            .replace("'", r"'\''")
+            absolute_path.replace(
+                "'",
+                r"'\''",
+            )
         )
 
         lines.append(
@@ -2566,8 +2684,7 @@ def concat_scenes(
     )
 
     if result.returncode != 0:
-        # Certains fichiers peuvent nécessiter
-        # une ré-encodage.
+
         result = run_command(
             [
                 "ffmpeg",
@@ -2592,6 +2709,7 @@ def concat_scenes(
         )
 
     if result.returncode != 0:
+
         raise RuntimeError(
             "Impossible d'assembler les scènes : "
             + result.stderr[-1200:]
@@ -2601,7 +2719,7 @@ def concat_scenes(
 
 
 # ============================================================
-# AJOUT DE LA NARRATION
+# AUDIO
 # ============================================================
 
 def attach_audio(
@@ -2609,9 +2727,6 @@ def attach_audio(
     audio_path: Path,
     output_path: Path,
 ) -> Path:
-    """
-    Ajoute la narration au montage vidéo.
-    """
 
     ensure_ffmpeg()
 
@@ -2645,6 +2760,7 @@ def attach_audio(
     )
 
     if result.returncode != 0:
+
         raise RuntimeError(
             "Impossible d'ajouter l'audio : "
             + result.stderr[-1200:]
@@ -2654,7 +2770,7 @@ def attach_audio(
 
 
 # ============================================================
-# SOUS-TITRES DANS LA VIDÉO
+# SOUS-TITRES
 # ============================================================
 
 def burn_subtitles(
@@ -2662,9 +2778,6 @@ def burn_subtitles(
     ass_path: Path,
     output_path: Path,
 ) -> Path:
-    """
-    Incruste les sous-titres ASS dans la vidéo.
-    """
 
     ensure_ffmpeg()
 
@@ -2673,12 +2786,20 @@ def burn_subtitles(
         exist_ok=True,
     )
 
-    # Le chemin peut contenir des caractères spéciaux.
     ass_filter_path = (
         str(ass_path)
-        .replace("\\", "/")
-        .replace(":", r"\:")
-        .replace("'", r"\'")
+        .replace(
+            "\\",
+            "/",
+        )
+        .replace(
+            ":",
+            r"\:",
+        )
+        .replace(
+            "'",
+            r"\'",
+        )
     )
 
     subtitle_filter = (
@@ -2707,6 +2828,7 @@ def burn_subtitles(
     )
 
     if result.returncode != 0:
+
         raise RuntimeError(
             "Impossible d'incruster les sous-titres : "
             + result.stderr[-1500:]
@@ -2722,40 +2844,44 @@ def build_video(
     filename: str,
     vertical: bool = True,
 ) -> Path:
-    """
-    Construit une vidéo complète :
-
-    1. narration
-    2. visuels
-    3. scènes animées
-    4. assemblage
-    5. ajout audio
-    6. sous-titres mot par mot
-    """
 
     ensure_ffmpeg()
 
-    script = clean_ai_text(script)
+    script = clean_ai_text(
+        script
+    )
 
     if not script:
+
         raise RuntimeError(
-            "Impossible de construire la vidéo : script vide."
+            "Impossible de construire la vidéo : "
+            "script vide."
         )
 
-    # --------------------------------------------------------
-    # FORMAT
-    # --------------------------------------------------------
-
     if vertical:
+
         width = 1080
         height = 1920
+
     else:
+
         width = 1920
         height = 1080
 
-    video_dir = output_dir / "video"
-    audio_dir = output_dir / "audio"
-    subtitle_dir = output_dir / "subtitles"
+    video_dir = (
+        output_dir
+        / "video"
+    )
+
+    audio_dir = (
+        output_dir
+        / "audio"
+    )
+
+    subtitle_dir = (
+        output_dir
+        / "subtitles"
+    )
 
     video_dir.mkdir(
         parents=True,
@@ -2776,10 +2902,13 @@ def build_video(
     # AUDIO
     # --------------------------------------------------------
 
-    st.write("🎙️ Génération de la narration...")
+    st.write(
+        "🎙️ Génération de la narration..."
+    )
 
-    audio_path = audio_dir / (
-        Path(filename).stem + ".mp3"
+    audio_path = (
+        audio_dir
+        / f"{Path(filename).stem}.mp3"
     )
 
     voice = select_french_voice()
@@ -2804,7 +2933,9 @@ def build_video(
     # VISUELS
     # --------------------------------------------------------
 
-    st.write("🖼️ Recherche des visuels...")
+    st.write(
+        "🖼️ Recherche des visuels..."
+    )
 
     visual_count = estimate_visual_count(
         audio_duration
@@ -2821,19 +2952,24 @@ def build_video(
     )
 
     # --------------------------------------------------------
-    # DURÉES DES SCÈNES
+    # DURÉES
     # --------------------------------------------------------
 
-    scene_durations = distribute_scene_durations(
-        total_duration=audio_duration,
-        visual_count=len(visuals),
+    scene_durations = (
+        distribute_scene_durations(
+            total_duration=audio_duration,
+            visual_count=len(visuals),
+        )
     )
 
     # --------------------------------------------------------
-    # CRÉATION DES SCÈNES
+    # SCÈNES
     # --------------------------------------------------------
 
-    scene_dir = video_dir / "scenes"
+    scene_dir = (
+        video_dir
+        / "scenes"
+    )
 
     scene_dir.mkdir(
         parents=True,
@@ -2877,11 +3013,15 @@ def build_video(
 
         progress.progress(
             int(
-                ((index + 1) / len(visuals))
+                (
+                    (index + 1)
+                    / len(visuals)
+                )
                 * 100
             ),
             text=(
-                f"🎬 Scène {index + 1}/"
+                f"🎬 Scène "
+                f"{index + 1}/"
                 f"{len(visuals)}"
             ),
         )
@@ -2892,7 +3032,9 @@ def build_video(
     # ASSEMBLAGE
     # --------------------------------------------------------
 
-    st.write("🔗 Assemblage des scènes...")
+    st.write(
+        "🔗 Assemblage des scènes..."
+    )
 
     silent_video = (
         video_dir
@@ -2908,7 +3050,9 @@ def build_video(
     # AUDIO
     # --------------------------------------------------------
 
-    st.write("🎙️ Ajout de la narration...")
+    st.write(
+        "🎙️ Ajout de la narration..."
+    )
 
     narrated_video = (
         video_dir
@@ -2936,8 +3080,10 @@ def build_video(
     )
 
     if not boundaries:
+
         raise RuntimeError(
-            "Impossible de générer les timings des sous-titres."
+            "Impossible de générer les timings "
+            "des sous-titres."
         )
 
     ass_path = (
@@ -2953,7 +3099,7 @@ def build_video(
     )
 
     # --------------------------------------------------------
-    # INCRUSTATION DES SOUS-TITRES
+    # INCRUSTATION
     # --------------------------------------------------------
 
     st.write(
@@ -2972,6 +3118,7 @@ def build_video(
     )
 
     if not final_path.exists():
+
         raise RuntimeError(
             "La vidéo finale n'a pas été créée."
         )
@@ -2986,9 +3133,6 @@ def build_video(
 def create_production_directory(
     topic: str,
 ) -> Path:
-    """
-    Crée un dossier unique pour une production.
-    """
 
     safe_topic = re.sub(
         r"[^a-zA-Z0-9À-ÿ_-]+",
@@ -3021,7 +3165,7 @@ def create_production_directory(
 
 
 # ============================================================
-# TRAITEMENT D'UN SHORT
+# SHORT
 # ============================================================
 
 def process_short(
@@ -3030,9 +3174,6 @@ def process_short(
     filename: str,
     label: str = "Short",
 ) -> Path:
-    """
-    Produit un Short vertical.
-    """
 
     st.subheader(
         f"📱 {label}"
@@ -3043,12 +3184,15 @@ def process_short(
     )
 
     if not script:
+
         raise RuntimeError(
             f"{label} : script vide."
         )
 
     word_count = count_words(
-        remove_visual_markers(script)
+        remove_visual_markers(
+            script
+        )
     )
 
     st.write(
@@ -3064,16 +3208,13 @@ def process_short(
 
 
 # ============================================================
-# TRAITEMENT VIDÉO LONGUE
+# VIDÉO LONGUE
 # ============================================================
 
 def process_long_video(
     script: str,
     production_dir: Path,
 ) -> Path:
-    """
-    Produit une vidéo longue en 16:9.
-    """
 
     st.subheader(
         "🎬 Vidéo YouTube longue"
@@ -3084,7 +3225,9 @@ def process_long_video(
     )
 
     word_count = count_words(
-        remove_visual_markers(script)
+        remove_visual_markers(
+            script
+        )
     )
 
     st.write(
@@ -3100,7 +3243,7 @@ def process_long_video(
 
 
 # ============================================================
-# TRAITEMENT TEASER
+# TEASER
 # ============================================================
 
 def process_teaser(
@@ -3108,15 +3251,13 @@ def process_teaser(
     topic: str,
     production_dir: Path,
 ) -> Optional[Path]:
-    """
-    Produit un teaser vertical.
-    """
 
     st.subheader(
         "🎯 Teaser"
     )
 
     try:
+
         teaser = generate_teaser(
             script=script,
             topic=topic,
@@ -3133,6 +3274,7 @@ def process_teaser(
         )
 
     except Exception as exc:
+
         st.warning(
             f"Teaser non généré : {exc}"
         )
@@ -3141,17 +3283,13 @@ def process_teaser(
 
 
 # ============================================================
-# COPIE DE LA VIDÉO FINALE
+# COPIE SORTIE
 # ============================================================
 
 def copy_final_output(
     source: Path,
     filename: str,
 ) -> Path:
-    """
-    Copie une vidéo dans outputs/ pour la rendre
-    facilement accessible depuis l'application.
-    """
 
     destination = (
         OUTPUT_DIR
@@ -3178,20 +3316,13 @@ def copy_final_output(
 def run_generation(
     topic: str,
 ) -> Dict[str, List[Path]]:
-    """
-    Workflow complet :
-
-    1. génération du script
-    2. sélection automatique du format
-    3. adaptation
-    4. génération vidéo
-    """
 
     topic = normalize_text(
         topic
     )
 
     if not topic:
+
         raise ValueError(
             "Veuillez saisir un sujet."
         )
@@ -3229,7 +3360,8 @@ def run_generation(
     )
 
     st.success(
-        f"Script généré : {word_count} mots"
+        f"Script généré : "
+        f"{word_count} mots"
     )
 
     st.write(
@@ -3241,9 +3373,9 @@ def run_generation(
         word_count
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # SCRIPT TROP COURT
-    # ========================================================
+    # --------------------------------------------------------
 
     if mode == "regenerate":
 
@@ -3252,35 +3384,43 @@ def run_generation(
             "Création d'une version mieux adaptée..."
         )
 
-        regenerated = regenerate_short_main_script(
-            topic
-        )
+        try:
 
-        regenerated = clean_ai_text(
-            regenerated
-        )
+            regenerated = (
+                regenerate_short_main_script(
+                    topic
+                )
+            )
 
-        # Si la nouvelle version est exploitable,
-        # on l'utilise.
-        if count_words(
-            remove_visual_markers(
+            regenerated = clean_ai_text(
                 regenerated
             )
-        ) > 0:
-            script = regenerated
 
-        word_count = count_words(
-            remove_visual_markers(
-                script
+            regenerated_count = count_words(
+                remove_visual_markers(
+                    regenerated
+                )
             )
-        )
+
+            if regenerated_count > 0:
+
+                script = regenerated
+                word_count = regenerated_count
+
+            st.write(
+                f"Nouvelle version : "
+                f"{word_count} mots"
+            )
+
+        except Exception as exc:
+
+            st.warning(
+                "La régénération du script court "
+                "a échoué. Le script initial sera "
+                f"utilisé. Détail : {exc}"
+            )
 
         mode = "one_short"
-
-        st.write(
-            f"Nouvelle version : "
-            f"{word_count} mots"
-        )
 
     results = {
         "shorts": [],
@@ -3288,15 +3428,14 @@ def run_generation(
         "teaser": [],
     }
 
-    # ========================================================
+    # --------------------------------------------------------
     # UN SHORT
-    # ========================================================
+    # --------------------------------------------------------
 
     if mode == "one_short":
 
         st.info(
-            "📱 Format sélectionné : "
-            "1 Short."
+            "📱 Format sélectionné : 1 Short."
         )
 
         short_script = generate_one_short(
@@ -3317,14 +3456,15 @@ def run_generation(
 
         return results
 
-    # ========================================================
+    # --------------------------------------------------------
     # DEUX SHORTS
-    # ========================================================
+    # --------------------------------------------------------
 
     if mode == "two_shorts":
 
         st.info(
-            "✂️ Restructuration en deux Shorts cohérents..."
+            "✂️ Restructuration en deux Shorts "
+            "cohérents..."
         )
 
         part1, part2 = generate_two_shorts(
@@ -3342,8 +3482,6 @@ def run_generation(
             part_label="Partie 2",
         )
 
-        # Si une partie est vide, on ne plante pas.
-        # On utilise le script original ou l'autre partie.
         if not part1:
             part1 = script
 
@@ -3355,12 +3493,12 @@ def run_generation(
         )
 
         st.write(
-            f"Partie 1 : "
+            "Partie 1 : "
             f"{count_words(remove_visual_markers(part1))} mots"
         )
 
         st.write(
-            f"Partie 2 : "
+            "Partie 2 : "
             f"{count_words(remove_visual_markers(part2))} mots"
         )
 
@@ -3388,9 +3526,9 @@ def run_generation(
 
         return results
 
-    # ========================================================
+    # --------------------------------------------------------
     # VIDÉO LONGUE
-    # ========================================================
+    # --------------------------------------------------------
 
     if mode == "long":
 
@@ -3408,7 +3546,6 @@ def run_generation(
             long_video
         )
 
-        # Un teaser est créé à partir de la vidéo longue.
         teaser = process_teaser(
             script=script,
             topic=topic,
@@ -3416,18 +3553,20 @@ def run_generation(
         )
 
         if teaser:
+
             results["teaser"].append(
                 teaser
             )
 
         return results
 
-    # ========================================================
+    # --------------------------------------------------------
     # SÉCURITÉ
-    # ========================================================
+    # --------------------------------------------------------
 
     st.warning(
-        "Format inattendu. Adaptation automatique vers un Short."
+        "Format inattendu. "
+        "Adaptation automatique vers un Short."
     )
 
     short_script = generate_one_short(
@@ -3450,16 +3589,13 @@ def run_generation(
 
 
 # ============================================================
-# INTERFACE STREAMLIT
+# AFFICHAGE VIDÉO
 # ============================================================
 
 def show_video_result(
     path: Path,
     title: str,
 ) -> None:
-    """
-    Affiche une vidéo produite.
-    """
 
     if not path.exists():
         return
@@ -3469,6 +3605,7 @@ def show_video_result(
     )
 
     try:
+
         with open(
             path,
             "rb",
@@ -3483,15 +3620,18 @@ def show_video_result(
         )
 
     except Exception as exc:
+
         st.warning(
-            f"Impossible d'afficher {title} : {exc}"
+            f"Impossible d'afficher "
+            f"{title} : {exc}"
         )
 
 
+# ============================================================
+# INTERFACE
+# ============================================================
+
 def main() -> None:
-    """
-    Point d'entrée Streamlit.
-    """
 
     st.set_page_config(
         page_title=APP_TITLE,
@@ -3522,19 +3662,25 @@ def main() -> None:
         )
 
         if OPENROUTER_API_KEY:
+
             st.success(
                 "OpenRouter : connecté"
             )
+
         else:
+
             st.error(
                 "OpenRouter : clé absente"
             )
 
         if PEXELS_API_KEY:
+
             st.success(
                 "Pexels : connecté"
             )
+
         else:
+
             st.warning(
                 "Pexels : clé absente"
             )
@@ -3563,8 +3709,7 @@ def main() -> None:
         )
 
         st.write(
-            "• Adaptation automatique si le script "
-            "ne correspond pas parfaitement"
+            "• Adaptation automatique si nécessaire"
         )
 
     # --------------------------------------------------------
@@ -3608,8 +3753,6 @@ def main() -> None:
 
             return
 
-        # Évite de garder des résultats anciens
-        # dans une même session.
         st.session_state.pop(
             "generation_results",
             None,
@@ -3702,15 +3845,11 @@ def main() -> None:
             "🎯 Teaser",
         )
 
-    # --------------------------------------------------------
-    # INFORMATIONS
-    # --------------------------------------------------------
-
     st.divider()
 
     st.info(
-        "Les vidéos sont enregistrées dans le dossier "
-        "`outputs` du serveur."
+        "Les vidéos sont enregistrées dans "
+        "le dossier `outputs` du serveur."
     )
 
 
