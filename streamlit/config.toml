@@ -1,0 +1,5 @@
+[server]
+address = "0.0.0.0"
+enableWebsocketCompression = false
+websocketPingInterval = 20
+disconnectedSessionTTL = 600
