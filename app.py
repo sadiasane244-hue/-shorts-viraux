@@ -2487,86 +2487,18 @@ def create_image_scene(
         exist_ok=True,
     )
 
+    # V1 : priorité à la fiabilité et à la vitesse.
+    # L'ancien zoompan calculait plusieurs centaines de frames
+    # avec une image agrandie en 2x, ce qui pouvait dépasser
+    # le timeout Render sur une seule scène.
     fps = 30
 
-    mode = scene_index % 4
-
-    if mode == 0:
-
-        zoom_expr = (
-            "min(zoom+0.0008,1.12)"
-        )
-
-        x_expr = (
-            "(iw-iw/zoom)/2"
-        )
-
-        y_expr = (
-            "(ih-ih/zoom)/2"
-        )
-
-    elif mode == 1:
-
-        zoom_expr = (
-            "min(zoom+0.00065,1.10)"
-        )
-
-        x_expr = (
-            "(iw-iw/zoom)*0.25"
-        )
-
-        y_expr = (
-            "(ih-ih/zoom)/2"
-        )
-
-    elif mode == 2:
-
-        zoom_expr = (
-            "min(zoom+0.0007,1.11)"
-        )
-
-        x_expr = (
-            "(iw-iw/zoom)*0.75"
-        )
-
-        y_expr = (
-            "(ih-ih/zoom)/2"
-        )
-
-    else:
-
-        zoom_expr = (
-            "min(zoom+0.0006,1.09)"
-        )
-
-        x_expr = (
-            "(iw-iw/zoom)/2"
-        )
-
-        y_expr = (
-            "(ih-ih/zoom)*0.35"
-        )
-
-    frames = max(
-        1,
-        int(
-            math.ceil(
-                duration * fps
-            )
-        ),
-    )
-
+    # On adapte simplement l'image au format demandé.
+    # Le crop conserve le remplissage de l'image sans zoompan.
     filter_complex = (
-        f"scale={width*2}:{height*2}:"
+        f"scale={width}:{height}:"
         "force_original_aspect_ratio=increase,"
-        f"crop={width*2}:{height*2},"
-        "zoompan="
-        f"z='{zoom_expr}':"
-        f"x='{x_expr}':"
-        f"y='{y_expr}':"
-        f"d={frames}:"
-        f"s={width}x{height}:"
-        f"fps={fps},"
+        f"crop={width}:{height},"
         "format=yuv420p"
     )
 
@@ -2590,25 +2522,25 @@ def create_image_scene(
             "-preset",
             "veryfast",
             "-crf",
-            "20",
+            "23",
             "-pix_fmt",
             "yuv420p",
             str(output_path),
         ],
-        timeout=180,
+        timeout=120,
     )
 
     if result.returncode != 0:
 
         raise RuntimeError(
             "Impossible de créer une scène vidéo : "
-            + result.stderr[-1000:]
+            + result.stderr[-1500:]
         )
 
-    if not output_path.exists():
+    if not output_path.exists() or output_path.stat().st_size == 0:
 
         raise RuntimeError(
-            "FFmpeg n'a pas créé la scène vidéo."
+            "FFmpeg n'a pas créé correctement la scène vidéo."
         )
 
     return output_path
