@@ -618,11 +618,23 @@ ou :
 11. Les marqueurs doivent correspondre
     à de vrais éléments illustrables.
 
-12. N'écrivez pas "Bonjour et bienvenue".
+12. Répartissez les marqueurs dans tout le script.
+    Pour un script destiné à environ 40 à 60 secondes,
+    visez idéalement 8 à 12 marqueurs visuels.
+    Chaque marqueur doit illustrer précisément la phrase
+    ou l'idée qui suit ou précède.
 
-13. Évitez les conclusions artificiellement longues.
+13. Les visuels doivent être captivants mais sobres,
+    respectueux et compatibles avec une chaîne éducative.
+    N'utilisez pas de gore, nudité, sexualisation,
+    violence gratuite, armes, drogues ou images choquantes
+    uniquement pour attirer l'attention.
 
-14. Terminez avec une idée mémorable.
+14. N'écrivez pas "Bonjour et bienvenue".
+
+15. Évitez les conclusions artificiellement longues.
+
+16. Terminez avec une idée mémorable.
 
 Le script doit être suffisamment développé
 pour pouvoir être adapté intelligemment en
@@ -713,6 +725,10 @@ Contraintes :
 - environ 90 à 130 mots
 - conclusion mémorable
 - texte directement utilisable en voix off
+- ajoutez 4 à 6 marqueurs [IMAGE: description précise]
+  répartis dans le texte et directement liés à la narration
+- visuels éducatifs, captivants et sobres
+- aucun visuel choquant, sexuel, violent ou inadapté
 
 Retournez uniquement le script.
 """
@@ -1470,6 +1486,201 @@ def create_placeholder(
 # VISUELS
 # ============================================================
 
+def _visual_query_is_safe(query: str) -> bool:
+    """Reject visual queries that could lead to inappropriate imagery."""
+
+    unsafe_terms = {
+        "blood", "bloody", "gore", "gory", "corpse", "dead body",
+        "murder", "killing", "weapon", "weapons", "gun", "guns",
+        "knife", "violence", "violent", "war", "drugs", "drug",
+        "cocaine", "heroin", "alcohol", "beer", "wine", "vodka",
+        "smoking", "cigarette", "vape", "nudity", "nude", "naked",
+        "sexual", "sex", "porn", "erotic", "self harm", "self-harm",
+        "suicide", "abuse", "torture", "terrorist", "terrorism",
+    }
+
+    normalized = normalize_text(query).lower()
+    normalized = re.sub(r"[-_/]+", " ", normalized)
+
+    return not any(
+        re.search(
+            rf"\b{re.escape(term)}\b",
+            normalized,
+            flags=re.I,
+        )
+        for term in unsafe_terms
+    )
+
+
+def _visual_query_keywords(text: str) -> List[str]:
+    """Extract simple, descriptive keywords from narration for Pexels."""
+
+    stopwords = {
+        "alors", "avec", "avoir", "bien", "dans", "dehors", "depuis",
+        "des", "donc", "elle", "elles", "entre", "est", "être", "fait",
+        "fois", "ils", "elles", "leur", "leurs", "mais", "même", "moins",
+        "notre", "nous", "parce", "pour", "quand", "que", "quel", "quelle",
+        "quelles", "quels", "sans", "sera", "sont", "sous", "sur", "ta",
+        "tes", "ton", "tous", "tout", "toute", "toutes", "très", "une",
+        "vous", "votre", "vos", "cette", "ceci", "cela", "comme", "comment",
+        "celles", "ceux", "aussi", "encore", "juste", "souvent", "parfois",
+        "peut", "peuvent", "doit", "doivent", "avait", "avez", "êtes", "ont",
+        "qui", "quoi", "dont", "ainsi", "plus", "moins", "beaucoup", "être",
+        "c'est", "ses", "son", "sa", "du", "de", "la", "le", "les", "un",
+        "une", "et", "ou", "où", "en", "au", "aux", "ce", "ces", "cet",
+        "cette", "il", "elle", "on", "je", "tu", "me", "te", "se", "y",
+        "lui", "eux", "ici", "très", "déjà", "alors", "ainsi", "vraiment",
+        "simplement", "souvent", "par", "vers", "après", "avant", "pendant",
+        "chaque", "quelque", "quelques", "certains", "certaines", "important",
+        "importante", "chose", "choses", "personne", "personnes",
+    }
+
+    tokens = re.findall(
+        r"[A-Za-zÀ-ÖØ-öø-ÿ]{5,}",
+        normalize_text(text),
+        flags=re.I,
+    )
+
+    keywords = []
+    seen = set()
+
+    for token in tokens:
+        key = token.lower()
+
+        if key in stopwords or key in seen:
+            continue
+
+        seen.add(key)
+        keywords.append(token)
+
+        if len(keywords) >= 7:
+            break
+
+    return keywords
+
+
+def _build_supplemental_visual_queries(
+    script: str,
+    markers: List[str],
+    target_count: int,
+) -> List[str]:
+    """Create extra queries tied to narration when the AI supplied too few markers."""
+
+    queries = []
+
+    for marker in markers:
+        marker = normalize_text(marker)
+        if marker and _visual_query_is_safe(marker):
+            queries.append(marker)
+
+    narration = remove_visual_markers(script)
+
+    sentences = [
+        part.strip()
+        for part in re.split(r"(?<=[.!?])\s+", narration)
+        if part.strip()
+    ]
+
+    if sentences:
+        step = max(
+            1,
+            math.ceil(len(sentences) / max(target_count, 1)),
+        )
+
+        for index in range(0, len(sentences), step):
+            sentence = sentences[index]
+            keywords = _visual_query_keywords(sentence)
+
+            if len(keywords) >= 2:
+                query = " ".join(keywords[:6])
+                if _visual_query_is_safe(query):
+                    queries.append(query)
+
+            if len(queries) >= target_count:
+                break
+
+    fallback_queries = [
+        "human brain neuroscience",
+        "person thinking psychology",
+        "focus concentration human behavior",
+        "decision making brain",
+        "brain activity neuroscience",
+        "person working concentration",
+        "human behavior psychology",
+        "mind attention neuroscience",
+    ]
+
+    for query in fallback_queries:
+        if len(queries) >= target_count:
+            break
+        if _visual_query_is_safe(query):
+            queries.append(query)
+
+    unique = []
+    seen = set()
+
+    for query in queries:
+        query = normalize_text(query)
+        key = query.lower()
+
+        if not query or key in seen:
+            continue
+
+        seen.add(key)
+        unique.append(query)
+
+        if len(unique) >= target_count:
+            break
+
+    return unique
+
+
+def _select_best_visual_photo(
+    photos: List[dict],
+    query: str,
+) -> Optional[dict]:
+    """Prefer the most relevant safe Pexels result instead of random selection."""
+
+    query_words = {
+        word.lower()
+        for word in re.findall(
+            r"[A-Za-zÀ-ÖØ-öø-ÿ]{4,}",
+            query,
+        )
+    }
+
+    candidates = []
+
+    for photo in photos:
+        if not isinstance(photo, dict):
+            continue
+
+        alt = normalize_text(
+            str(photo.get("alt", ""))
+        ).lower()
+
+        if not _visual_query_is_safe(alt):
+            continue
+
+        score = sum(
+            1
+            for word in query_words
+            if word in alt
+        )
+
+        candidates.append((score, photo))
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item: item[0],
+        reverse=True,
+    )
+
+    return candidates[0][1]
+
+
 def get_visuals(
     script: str,
     output_dir: Path,
@@ -1480,22 +1691,24 @@ def get_visuals(
         script
     )
 
-    if not markers:
-
-        markers = [
-            "psychology brain human behavior",
-            "human brain neuroscience",
-            "person thinking",
-        ]
-
-    if target_count is not None:
-
+    if target_count is None:
+        target_count = estimate_visual_count(
+            45.0
+        )
+    else:
         target_count = max(
             1,
             int(target_count),
         )
 
-        markers = markers[:target_count]
+    # Les marqueurs IA restent prioritaires. S'il n'y en a pas assez,
+    # on complète à partir de la narration afin que chaque visuel reste
+    # lié au contenu raconté, plutôt que de répéter quelques images.
+    queries = _build_supplemental_visual_queries(
+        script=script,
+        markers=markers,
+        target_count=target_count,
+    )
 
     visual_dir = (
         output_dir
@@ -1508,18 +1721,15 @@ def get_visuals(
     )
 
     visuals = []
-
     used_queries = set()
 
     for index, query in enumerate(
-        markers
+        queries[:target_count]
     ):
 
-        query = normalize_text(
-            query
-        )
+        query = normalize_text(query)
 
-        if not query:
+        if not query or not _visual_query_is_safe(query):
             continue
 
         query_key = query.lower()
@@ -1536,18 +1746,10 @@ def get_visuals(
             per_page=5,
         )
 
-        selected_photo = None
-
-        if photos:
-
-            selected_photo = random.choice(
-                photos[
-                    :min(
-                        len(photos),
-                        5,
-                    )
-                ]
-            )
+        selected_photo = _select_best_visual_photo(
+            photos,
+            query,
+        )
 
         raw_path = (
             visual_dir
@@ -1597,6 +1799,8 @@ def get_visuals(
 
                         continue
 
+        # Un visuel neutre lié à la requête est préférable à une image
+        # sans rapport avec la narration ou potentiellement inadaptée.
         placeholder = create_placeholder(
             final_path,
             query,
@@ -1641,6 +1845,14 @@ def estimate_visual_count(
     count = math.ceil(
         duration_seconds / 4.5
     )
+
+    # Pour les Shorts, on évite de dépasser 12 scènes afin de
+    # conserver un bon équilibre entre dynamisme et temps de rendu.
+    if duration_seconds <= SHORT_MAX_SECONDS:
+        return max(
+            5,
+            min(count, 12),
+        )
 
     return max(
         5,
@@ -2871,6 +3083,11 @@ def build_video(
 
     visual_count = estimate_visual_count(
         audio_duration
+    )
+
+    st.caption(
+        f"🎯 Objectif visuel : {visual_count} images "
+        "adaptées au contenu de la narration."
     )
 
     visuals = get_visuals(
