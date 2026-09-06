@@ -577,7 +577,9 @@ neurosciences accessibles et comportement humain.
 SUJET :
 {topic}
 
-Écrivez un script captivant destiné à une vidéo YouTube.
+Écrivez un script captivant, amusant et très naturel destiné à une vidéo YouTube.
+
+Le ton doit donner envie de continuer à regarder : curiosité, surprises, petites touches d'humour et situations auxquelles on peut s'identifier. Il ne doit jamais ressembler à un cours scolaire.
 
 RÈGLES ABSOLUES :
 
@@ -599,8 +601,10 @@ RÈGLES ABSOLUES :
 
 6. Évitez le jargon inutile.
 
-7. Le ton doit être naturel, dynamique
-   et humain.
+7. Le ton doit être naturel, dynamique, amusant
+   et humain. Utilisez de petites touches d'humour,
+   des formulations surprenantes et des exemples du quotidien
+   lorsque cela aide à retenir l'attention, sans déformer les faits.
 
 8. Le texte doit fonctionner avec
    une narration vocale.
@@ -624,8 +628,13 @@ ou :
     Chaque marqueur doit illustrer précisément la phrase
     ou l'idée qui suit ou précède.
 
-13. Les visuels doivent être captivants mais sobres,
-    respectueux et compatibles avec une chaîne éducative.
+13. Les visuels doivent être captivants, vivants et parfois
+    légèrement amusants lorsque le sujet s'y prête.
+    Ils doivent surtout illustrer précisément la narration,
+    sans être sensationnalistes. Ils peuvent montrer des
+    situations du quotidien, des expressions naturelles,
+    des métaphores visuelles ou des scènes surprenantes
+    si elles restent fidèles au sujet.
     N'utilisez pas de gore, nudité, sexualisation,
     violence gratuite, armes, drogues ou images choquantes
     uniquement pour attirer l'attention.
@@ -724,10 +733,12 @@ Contraintes :
 - aucune étude inventée
 - environ 90 à 130 mots
 - conclusion mémorable
+- ton amusant, surprenant et naturel, jamais scolaire
 - texte directement utilisable en voix off
 - ajoutez 4 à 6 marqueurs [IMAGE: description précise]
   répartis dans le texte et directement liés à la narration
-- visuels éducatifs, captivants et sobres
+- visuels captivants, vivants et parfois amusants lorsque cela convient
+- chaque visuel doit illustrer précisément ce qui est raconté
 - aucun visuel choquant, sexuel, violent ou inadapté
 
 Retournez uniquement le script.
@@ -824,6 +835,8 @@ def generate_two_shorts(
     prompt = f"""
 Transformez ce script en DEUX Shorts YouTube
 sur la psychologie, le cerveau ou le comportement humain.
+Le ton doit être amusant, surprenant et très accessible, avec
+de petites touches d'humour lorsque cela reste fidèle aux faits.
 
 SUJET :
 {topic}
@@ -833,7 +846,7 @@ SCRIPT ORIGINAL :
 
 OBJECTIF :
 
-Créer deux parties autonomes et cohérentes.
+Créer deux parties autonomes, cohérentes, amusantes et captivantes.
 
 PARTIE 1 :
 - accroche forte
@@ -1564,14 +1577,14 @@ def _build_supplemental_visual_queries(
     markers: List[str],
     target_count: int,
 ) -> List[str]:
-    """Create extra queries tied to narration when the AI supplied too few markers."""
+    """Build safe, narration-linked visual queries, with varied and engaging imagery."""
 
     queries = []
 
     for marker in markers:
         marker = normalize_text(marker)
         if marker and _visual_query_is_safe(marker):
-            queries.append(marker)
+            queries.append(f"{marker} realistic photo")
 
     narration = remove_visual_markers(script)
 
@@ -1592,7 +1605,7 @@ def _build_supplemental_visual_queries(
             keywords = _visual_query_keywords(sentence)
 
             if len(keywords) >= 2:
-                query = " ".join(keywords[:6])
+                query = " ".join(keywords[:6]) + " realistic photo"
                 if _visual_query_is_safe(query):
                     queries.append(query)
 
@@ -1600,14 +1613,14 @@ def _build_supplemental_visual_queries(
                 break
 
     fallback_queries = [
-        "human brain neuroscience",
-        "person thinking psychology",
-        "focus concentration human behavior",
-        "decision making brain",
-        "brain activity neuroscience",
-        "person working concentration",
-        "human behavior psychology",
-        "mind attention neuroscience",
+        "human brain neuroscience realistic photo",
+        "person thinking everyday life realistic photo",
+        "focus concentration human behavior realistic photo",
+        "decision making brain realistic photo",
+        "brain activity neuroscience realistic photo",
+        "person working concentration realistic photo",
+        "human behavior psychology realistic photo",
+        "mind attention neuroscience realistic photo",
     ]
 
     for query in fallback_queries:
