@@ -2749,6 +2749,17 @@ def create_image_scene(
     height: int = SHORT_HEIGHT,
     motion_index: int = 0,
 ) -> Path:
+    """
+    Transforme une image en plan vidéo.
+    
+    Version robuste :
+    - aucun zoompan
+    - aucun pad
+    - conservation du ratio
+    - l'image est toujours suffisamment grande pour le crop
+    - léger mouvement horizontal ou vertical
+    - compatible avec les images portrait et paysage
+    """
 
     ensure_ffmpeg()
 
@@ -2757,26 +2768,31 @@ def create_image_scene(
         float(duration),
     )
 
+    if not image_path.exists():
+        raise RuntimeError(
+            f"Image introuvable : {image_path}"
+        )
+
     output_path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     # --------------------------------------------------------
-    # Aucun zoompan.
+    # Mouvement léger.
     #
-    # Le mouvement est réalisé par un léger recadrage
-    # animé afin de conserver une bonne vitesse FFmpeg.
+    # On agrandit légèrement l'image par rapport à la taille
+    # finale afin d'avoir une marge pour le déplacement.
     # --------------------------------------------------------
 
-    motion_scale = 1.04
+    motion_scale = 1.06
 
     scaled_width = int(
-        width * motion_scale
+        math.ceil(width * motion_scale)
     )
 
     scaled_height = int(
-        height * motion_scale
+        math.ceil(height * motion_scale)
     )
 
     cycle = max(
@@ -2784,12 +2800,22 @@ def create_image_scene(
         1.0,
     )
 
-    amplitude = 0.015
+    amplitude = 0.035
 
     phase = (
         int(motion_index)
         % 4
     )
+
+    # --------------------------------------------------------
+    # Positions du crop.
+    #
+    # L'image a été mise à l'échelle avec
+    # force_original_aspect_ratio=increase.
+    #
+    # Elle sera donc toujours au moins aussi grande que
+    # la résolution finale.
+    # --------------------------------------------------------
 
     if phase == 0:
 
@@ -2839,17 +2865,26 @@ def create_image_scene(
             f"*cos(2*PI*t/{cycle:.4f})"
         )
 
+    # --------------------------------------------------------
+    # FILTRE FFmpeg ROBUSTE
+    #
+    # IMPORTANT :
+    # On utilise "increase" et non "decrease".
+    #
+    # Cela garantit que l'image sera suffisamment grande
+    # pour le crop final.
+    #
+    # Aucun "pad" n'est nécessaire.
+    # --------------------------------------------------------
+
     vf = (
         f"scale={scaled_width}:"
         f"{scaled_height}:"
-        "force_original_aspect_ratio=decrease,"
-        f"pad={scaled_width}:"
-        f"{scaled_height}:"
-        "(ow-iw)/2:"
-        "(oh-ih)/2,"
+        "force_original_aspect_ratio=increase,"
         f"crop={width}:{height}:"
         f"{crop_x}:{crop_y},"
-        "setsar=1"
+        "setsar=1,"
+        "format=yuv420p"
     )
 
     command = [
@@ -2898,8 +2933,13 @@ def create_image_scene(
             "Le plan vidéo n'a pas été créé."
         )
 
-    return output_path
+    if output_path.stat().st_size <= 0:
 
+        raise RuntimeError(
+            "Le plan vidéo créé est vide."
+        )
+
+    return output_path
 
 # ============================================================
 # CRÉATION DES PLANS
