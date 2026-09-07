@@ -6,6 +6,7 @@ import math
 import shutil
 import asyncio
 import tempfile
+import unicodedata
 import subprocess
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
