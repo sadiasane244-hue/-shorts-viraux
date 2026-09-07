@@ -4099,93 +4099,49 @@ def subtitle_safe_word(
 
     return word
 
-
-def build_word_subtitle_filter(
-    boundaries: List[Dict[str, object]],
-) -> str:
+def build_word_subtitle_filter(boundaries):
     """
-    Construit le filtre FFmpeg des sous-titres mot par mot.
+    Construit un filtre FFmpeg drawtext mot par mot.
 
-    Important :
-    - un seul mot affiché à la fois
-    - aucun ASS
-    - aucun code couleur
-    - aucune phrase empilée
-    - les virgules de between() sont échappées pour FFmpeg
+    Chaque mot apparaît uniquement pendant son propre intervalle
+    temporel. Aucun ASS, aucune couleur dynamique.
     """
+
+    if not boundaries:
+        return ""
 
     filters = []
 
-    for boundary in boundaries:
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
-        word = clean_subtitle_word(
-            str(
-                boundary.get(
-                    "word",
-                    "",
-                )
-            )
-        )
-
-        if not word:
+    for item in boundaries:
+        if len(item) < 3:
             continue
 
-        try:
-            start = float(
-                boundary.get(
-                    "start",
-                    0.0,
-                )
-            )
+        word = str(item[0]).strip()
+        start = float(item[1])
+        end = float(item[2])
 
-            end = float(
-                boundary.get(
-                    "end",
-                    start + 0.05,
-                )
-            )
-
-        except (
-            ValueError,
-            TypeError,
-        ):
+        if not word:
             continue
 
         if end <= start:
             continue
 
-        safe_word = subtitle_safe_word(
-            word
-        )
-
-        if not safe_word:
-            continue
-
-        # ----------------------------------------------------
-        # IMPORTANT :
-        # Les virgules dans l'expression FFmpeg doivent être
-        # échappées.
-        #
-        # Sans cela :
-        #
-        # between(t,0.000,14.098)
-        #
-        # peut être interprété comme plusieurs filtres.
-        # ----------------------------------------------------
+        safe_word = subtitle_safe_word(word)
 
         enable_expression = (
             f"between(t\\,{start:.3f}\\,{end:.3f})"
         )
 
-        drawtext_filter = (
+        drawtext = (
             "drawtext="
+            f"fontfile='{font_path}':"
             f"text='{safe_word}':"
-            "fontfile=/usr/share/fonts/"
-            "truetype/dejavu/"
-            "DejaVuSans-Bold.ttf:"
             "fontcolor=white:"
             "fontsize=72:"
-            "borderw=5:"
+            "fontweight=bold:"
+            "borderw=4:"
             "bordercolor=black:"
             "shadowx=2:"
             "shadowy=2:"
@@ -4194,12 +4150,9 @@ def build_word_subtitle_filter(
             f"enable='{enable_expression}'"
         )
 
-        filters.append(
-            drawtext_filter
-        )
+        filters.append(drawtext)
 
     return ",".join(filters)
-    )
 
 def burn_word_by_word_subtitles(
     input_video: Path,
