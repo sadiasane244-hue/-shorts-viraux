@@ -4103,6 +4103,16 @@ def subtitle_safe_word(
 def build_word_subtitle_filter(
     boundaries: List[Dict[str, object]],
 ) -> str:
+    """
+    Construit le filtre FFmpeg des sous-titres mot par mot.
+
+    Important :
+    - un seul mot affiché à la fois
+    - aucun ASS
+    - aucun code couleur
+    - aucune phrase empilée
+    - les virgules de between() sont échappées pour FFmpeg
+    """
 
     filters = []
 
@@ -4121,7 +4131,6 @@ def build_word_subtitle_filter(
             continue
 
         try:
-
             start = float(
                 boundary.get(
                     "start",
@@ -4140,7 +4149,6 @@ def build_word_subtitle_filter(
             ValueError,
             TypeError,
         ):
-
             continue
 
         if end <= start:
@@ -4154,15 +4162,22 @@ def build_word_subtitle_filter(
             continue
 
         # ----------------------------------------------------
-        # UN SEUL MOT À LA FOIS.
+        # IMPORTANT :
+        # Les virgules dans l'expression FFmpeg doivent être
+        # échappées.
         #
-        # Aucun ASS.
-        # Aucun code de couleur.
-        # Aucun texte empilé.
-        # Aucun karaoké.
+        # Sans cela :
+        #
+        # between(t,0.000,14.098)
+        #
+        # peut être interprété comme plusieurs filtres.
         # ----------------------------------------------------
 
-        filters.append(
+        enable_expression = (
+            f"between(t\\,{start:.3f}\\,{end:.3f})"
+        )
+
+        drawtext_filter = (
             "drawtext="
             f"text='{safe_word}':"
             "fontfile=/usr/share/fonts/"
@@ -4176,15 +4191,15 @@ def build_word_subtitle_filter(
             "shadowy=2:"
             "x=(w-text_w)/2:"
             "y=h-text_h-170:"
-            f"enable='between(t,"
-            f"{start:.3f},"
-            f"{end:.3f})'"
+            f"enable='{enable_expression}'"
         )
 
-    return ",".join(
-        filters
-    )
+        filters.append(
+            drawtext_filter
+        )
 
+    return ",".join(filters)
+    )
 
 def burn_word_by_word_subtitles(
     input_video: Path,
