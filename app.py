@@ -4098,12 +4098,28 @@ def subtitle_safe_word(
 
     return word
 
-def build_word_subtitle_filter(boundaries):
+def build_word_subtitle_filter(
+    boundaries,
+) -> str:
     """
-    Construit un filtre FFmpeg drawtext mot par mot.
+    Construit le filtre FFmpeg drawtext mot par mot.
 
-    Chaque mot apparaît uniquement pendant son propre intervalle
-    temporel. Aucun ASS, aucune couleur dynamique.
+    Accepte les timings sous forme de dictionnaires :
+        {
+            "word": "...",
+            "start": 0.0,
+            "end": 0.5,
+        }
+
+    Accepte également les anciens formats tuple/list :
+        ("mot", 0.0, 0.5)
+
+    Chaque mot est affiché individuellement pendant
+    son propre intervalle temporel.
+
+    Aucun ASS.
+    Aucun code de couleur.
+    Aucun empilement de phrases.
     """
 
     if not boundaries:
@@ -4111,15 +4127,107 @@ def build_word_subtitle_filter(boundaries):
 
     filters = []
 
-    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    font_candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+    ]
+
+    font_path = None
+
+    for candidate in font_candidates:
+        if os.path.exists(candidate):
+            font_path = candidate
+            break
+
+    if font_path is None:
+        raise RuntimeError(
+            "Aucune police compatible avec FFmpeg drawtext "
+            "n'a été trouvée sur le serveur."
+        )
+
+    # Échappement spécifique au chemin de police FFmpeg.
+    font_path = (
+        font_path
+        .replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("'", "\\'")
+    )
 
     for item in boundaries:
-        if len(item) < 3:
+
+        # --------------------------------------------------------
+        # FORMAT DICTIONNAIRE
+        # --------------------------------------------------------
+
+        if isinstance(item, dict):
+
+            word = str(
+                item.get(
+                    "word",
+                    "",
+                )
+            ).strip()
+
+            try:
+                start = float(
+                    item.get(
+                        "start",
+                        0.0,
+                    )
+                )
+
+                end = float(
+                    item.get(
+                        "end",
+                        start + 0.05,
+                    )
+                )
+
+            except (
+                ValueError,
+                TypeError,
+            ):
+                continue
+
+        # --------------------------------------------------------
+        # FORMAT LISTE / TUPLE
+        # --------------------------------------------------------
+
+        elif isinstance(
+            item,
+            (list, tuple),
+        ) and len(item) >= 3:
+
+            word = str(
+                item[0]
+            ).strip()
+
+            try:
+                start = float(
+                    item[1]
+                )
+
+                end = float(
+                    item[2]
+                )
+
+            except (
+                ValueError,
+                TypeError,
+            ):
+                continue
+
+        else:
             continue
 
-        word = str(item[0]).strip()
-        start = float(item[1])
-        end = float(item[2])
+        # --------------------------------------------------------
+        # NETTOYAGE
+        # --------------------------------------------------------
+
+        word = clean_subtitle_word(
+            word
+        )
 
         if not word:
             continue
@@ -4127,7 +4235,30 @@ def build_word_subtitle_filter(boundaries):
         if end <= start:
             continue
 
-        safe_word = subtitle_safe_word(word)
+        safe_word = subtitle_safe_word(
+            word
+        )
+
+        if not safe_word:
+            continue
+
+        # --------------------------------------------------------
+        # PROTECTION DES TIMINGS
+        # --------------------------------------------------------
+
+        start = max(
+            0.0,
+            start,
+        )
+
+        end = max(
+            start + 0.03,
+            end,
+        )
+
+        # --------------------------------------------------------
+        # AFFICHAGE D'UN SEUL MOT
+        # --------------------------------------------------------
 
         enable_expression = (
             f"between(t\\,{start:.3f}\\,{end:.3f})"
@@ -4149,9 +4280,13 @@ def build_word_subtitle_filter(boundaries):
             f"enable='{enable_expression}'"
         )
 
-        filters.append(drawtext)
+        filters.append(
+            drawtext
+        )
 
-    return ",".join(filters)
+    return ",".join(
+        filters
+    )
 
 def burn_word_by_word_subtitles(
     input_video: Path,
