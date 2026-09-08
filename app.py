@@ -17,7 +17,6 @@ import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 import edge_tts
 
-
 # ============================================================
 # CONFIGURATION
 # ============================================================
