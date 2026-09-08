@@ -4103,7 +4103,19 @@ def subtitle_safe_word(word: str) -> str:
     )
 
     return word
+def find_subtitle_font() -> Optional[str]:
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+    ]
 
+    for font_path in candidates:
+        if os.path.exists(font_path):
+            return font_path
+
+    return None
 def build_word_subtitle_filter(
     boundaries,
     video_width=1080,
