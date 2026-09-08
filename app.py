@@ -4053,10 +4053,10 @@ def clean_subtitle_word(
         word
     )
 
-
-def subtitle_safe_word(
-    word: str,
-) -> str:
+def subtitle_safe_word(word: str) -> str:
+    """
+    Échappe correctement un mot pour FFmpeg drawtext.
+    """
 
     word = clean_subtitle_word(
         word
@@ -4065,22 +4065,28 @@ def subtitle_safe_word(
     if not word:
         return ""
 
-    # drawtext utilise ":" comme séparateur
-    # de paramètres.
+    # Backslash
     word = word.replace(
-        ":",
-        "\\:",
+        "\\",
+        "\\\\",
     )
 
-    # Protection des apostrophes.
+    # Caractères spéciaux du filtergraph
     word = word.replace(
         "'",
         "\\'",
     )
 
-    # Protection des caractères spéciaux
-    # pouvant avoir une signification dans
-    # les expressions FFmpeg.
+    word = word.replace(
+        ":",
+        "\\:",
+    )
+
+    word = word.replace(
+        ",",
+        "\\,",
+    )
+
     word = word.replace(
         "%",
         "\\%",
@@ -4100,140 +4106,77 @@ def subtitle_safe_word(
 
 def build_word_subtitle_filter(
     boundaries,
-) -> str:
+    video_width=1080,
+    video_height=1920,
+):
     """
-    Construit le filtre FFmpeg drawtext mot par mot.
+    Génère le filtre FFmpeg pour les sous-titres mot par mot.
 
-    Accepte les timings sous forme de dictionnaires :
-        {
-            "word": "...",
-            "start": 0.0,
-            "end": 0.5,
-        }
-
-    Accepte également les anciens formats tuple/list :
-        ("mot", 0.0, 0.5)
-
-    Chaque mot est affiché individuellement pendant
-    son propre intervalle temporel.
-
-    Aucun ASS.
-    Aucun code de couleur.
-    Aucun empilement de phrases.
+    Règles :
+    - un seul mot affiché à la fois
+    - aucun ASS
+    - aucune balise de couleur
+    - aucun karaoke
+    - aucun code \c&H...&
+    - synchronisation exacte avec les timings Edge-TTS
     """
 
-    if not boundaries:
-        return ""
+    font_path = find_subtitle_font()
 
     filters = []
 
-    font_candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-    ]
+    # Taille adaptée au format de la vidéo
+    font_size = max(
+        42,
+        min(
+            72,
+            int(video_width * 0.055),
+        ),
+    )
 
-    font_path = None
-
-    for candidate in font_candidates:
-        if os.path.exists(candidate):
-            font_path = candidate
-            break
-
-    if font_path is None:
-        raise RuntimeError(
-            "Aucune police compatible avec FFmpeg drawtext "
-            "n'a été trouvée sur le serveur."
-        )
-
-    # Échappement spécifique au chemin de police FFmpeg.
-    font_path = (
-        font_path
-        .replace("\\", "\\\\")
-        .replace(":", "\\:")
-        .replace("'", "\\'")
+    # Position basse, mais suffisamment haute pour
+    # laisser de l'espace à la mascotte.
+    y_position = int(
+        video_height * 0.80
     )
 
     for item in boundaries:
 
-        # --------------------------------------------------------
-        # FORMAT DICTIONNAIRE
-        # --------------------------------------------------------
-
-        if isinstance(item, dict):
-
-            word = str(
-                item.get(
-                    "word",
-                    "",
-                )
-            ).strip()
-
-            try:
-                start = float(
-                    item.get(
-                        "start",
-                        0.0,
-                    )
-                )
-
-                end = float(
-                    item.get(
-                        "end",
-                        start + 0.05,
-                    )
-                )
-
-            except (
-                ValueError,
-                TypeError,
-            ):
-                continue
-
-        # --------------------------------------------------------
-        # FORMAT LISTE / TUPLE
-        # --------------------------------------------------------
-
-        elif isinstance(
-            item,
-            (list, tuple),
-        ) and len(item) >= 3:
-
-            word = str(
-                item[0]
-            ).strip()
-
-            try:
-                start = float(
-                    item[1]
-                )
-
-                end = float(
-                    item[2]
-                )
-
-            except (
-                ValueError,
-                TypeError,
-            ):
-                continue
-
-        else:
+        if not isinstance(item, dict):
             continue
 
-        # --------------------------------------------------------
-        # NETTOYAGE
-        # --------------------------------------------------------
-
-        word = clean_subtitle_word(
-            word
+        word = item.get(
+            "word",
+            "",
         )
 
-        if not word:
+        try:
+            start = float(
+                item.get(
+                    "start",
+                    0,
+                )
+            )
+
+            end = float(
+                item.get(
+                    "end",
+                    start + 0.1,
+                )
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
             continue
 
         if end <= start:
             continue
+
+        # ----------------------------------------------------
+        # Nettoyage du mot
+        # ----------------------------------------------------
 
         safe_word = subtitle_safe_word(
             word
@@ -4242,43 +4185,78 @@ def build_word_subtitle_filter(
         if not safe_word:
             continue
 
-        # --------------------------------------------------------
-        # PROTECTION DES TIMINGS
-        # --------------------------------------------------------
+        # ----------------------------------------------------
+        # Échappement IMPORTANT des virgules
+        # ----------------------------------------------------
+        #
+        # FFmpeg utilise la virgule comme séparateur
+        # dans un filtergraph.
+        #
+        # between(t,20.5,21.0)
+        #
+        # doit devenir :
+        #
+        # between(t\,20.5\,21.0)
+        #
+        # sinon FFmpeg interprète les morceaux comme
+        # des filtres séparés.
+        # ----------------------------------------------------
 
-        start = max(
-            0.0,
-            start,
-        )
-
-        end = max(
-            start + 0.03,
-            end,
-        )
-
-        # --------------------------------------------------------
-        # AFFICHAGE D'UN SEUL MOT
-        # --------------------------------------------------------
+        start_text = f"{start:.3f}"
+        end_text = f"{end:.3f}"
 
         enable_expression = (
-            f"between(t\\,{start:.3f}\\,{end:.3f})"
+            f"between(t\\,{start_text}\\,{end_text})"
         )
 
-        drawtext = (
-            "drawtext="
-            f"fontfile='{font_path}':"
-            f"text='{safe_word}':"
-            "fontcolor=white:"
-            "fontsize=72:"
-            "fontweight=bold:"
-            "borderw=4:"
-            "bordercolor=black:"
-            "shadowx=2:"
-            "shadowy=2:"
-            "x=(w-text_w)/2:"
-            "y=h-text_h-170:"
-            f"enable='{enable_expression}'"
-        )
+        # ----------------------------------------------------
+        # Construction du drawtext
+        # ----------------------------------------------------
+
+        if font_path:
+
+            escaped_font = (
+                font_path
+                .replace(
+                    "\\",
+                    "\\\\",
+                )
+                .replace(
+                    ":",
+                    "\\:",
+                )
+            )
+
+            drawtext = (
+                "drawtext="
+                f"fontfile='{escaped_font}':"
+                f"text='{safe_word}':"
+                f"fontcolor=white:"
+                f"fontsize={font_size}:"
+                "borderw=5:"
+                "bordercolor=black:"
+                "shadowx=2:"
+                "shadowy=2:"
+                "x=(w-text_w)/2:"
+                f"y={y_position}:"
+                f"enable='{enable_expression}'"
+            )
+
+        else:
+
+            drawtext = (
+                "drawtext="
+                f"text='{safe_word}':"
+                "fontcolor=white:"
+                f"fontsize={font_size}:"
+                "borderw=5:"
+                "bordercolor=black:"
+                "shadowx=2:"
+                "shadowy=2:"
+                "x=(w-text_w)/2:"
+                f"y={y_position}:"
+                f"enable='{enable_expression}'"
+            )
 
         filters.append(
             drawtext
