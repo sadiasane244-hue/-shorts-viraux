@@ -78,7 +78,7 @@ TU DOIS PRODUIRE DEUX SCRIPTS DANS LE MÊME RETOUR JSON :
 DÉCOUPAGE ET ÉMOTIONS :
 Associe les phrases à une émotion parmi : ["default", "thinking", "confused", "laughing", "explaining", "surprised"].
 
-STRUCTURE JSON EXIGÉE :
+STRUCTURE JSON EXIGÉE (UNIQUEMENT DU JSON VALIDE, AUCUN AUTRE TEXTE) :
 {
   "title": "Titre accrocheur",
   "script_long": [
@@ -98,18 +98,43 @@ def call_openrouter(topic: str) -> str:
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://streamlit.io",
+        "X-Title": "Cerveau Curieux Studio"
     }
-    payload = {
-        "model": "openrouter/free",  # Utilisation du modèle 100% gratuit
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Sujet de la vidéo : {topic}"}
-        ]
-    }
-    response = requests.post(url, json=payload, headers=headers, timeout=45)
-    response.raise_for_status()
-    return response.json()["choices"][0]["message"]["content"]
+    
+    # Liste de modèles 100% gratuits ultra-rapides essayés successivement en cas de délai
+    free_models = [
+        "google/gemini-2.0-flash-exp:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "google/gemini-flash-1.5-8b:free",
+        "openrouter/free"
+    ]
+    
+    last_error = ""
+    for model in free_models:
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"Sujet de la vidéo : {topic}"}
+            ],
+            "temperature": 0.7
+        }
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=25)
+            if response.status_code == 200:
+                data = response.json()
+                choices = data.get("choices", [])
+                if choices and len(choices) > 0:
+                    content = choices[0].get("message", {}).get("content")
+                    if content and isinstance(content, str) and len(content.strip()) > 0:
+                        return content
+        except Exception as e:
+            last_error = str(e)
+            continue
+            
+    raise RuntimeError(f"Aucun serveur IA gratuit n'a répondu à temps. (Dernière tentative : {last_error})")
 
 # ============================================================
 # PEXELS VIDEO SEARCH
@@ -281,17 +306,23 @@ def main():
         progress = st.progress(0)
         
         try:
-            status.info("🧠 L'IA prépare les scripts et les émotions...")
+            status.info("🧠 L'IA prépare les scripts (génération rapide)...")
             progress.progress(15)
             
             raw_ai = call_openrouter(topic)
+            if not raw_ai:
+                raise RuntimeError("L'IA n'a renvoyé aucune donnée texte.")
             
-            # Nettoyage ultra-robuste avec regex ASCII (évite les erreurs de syntaxe)
+            # Nettoyage et extraction ultra-sécurisée du JSON
             clean_ai = raw_ai.strip()
             clean_ai = re.sub(r"^\x60{3}(?:json)?\s*", "", clean_ai, flags=re.IGNORECASE)
             clean_ai = re.sub(r"\s*\x60{3}$", "", clean_ai)
-            clean_ai = clean_ai.strip()
             
+            # Recherche uniquement du bloc JSON entre accolades
+            json_match = re.search(r"\{.*\}", clean_ai, re.DOTALL)
+            if json_match:
+                clean_ai = json_match.group(0)
+                
             ai_data = json.loads(clean_ai)
             
             if mode in ["pack_complete", "long_only"]:
