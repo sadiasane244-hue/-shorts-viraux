@@ -103,7 +103,6 @@ def call_openrouter(topic: str) -> str:
         "X-Title": "Cerveau Curieux Studio"
     }
     
-    # Liste de modèles 100% gratuits ultra-rapides essayés successivement en cas de délai
     free_models = [
         "google/gemini-2.0-flash-exp:free",
         "meta-llama/llama-3.3-70b-instruct:free",
@@ -175,7 +174,7 @@ def download_file(url: str, dest_path: Path) -> bool:
         return False
 
 # ============================================================
-# PRODUCTION VIDEO
+# PRODUCTION VIDEO (DISTINCTION IMAGE VS VIDÉO)
 # ============================================================
 
 def create_scene_clips(scenes: List[Dict], work_dir: Path, width: int, height: int) -> List[Path]:
@@ -183,24 +182,41 @@ def create_scene_clips(scenes: List[Dict], work_dir: Path, width: int, height: i
     fps = 25
     
     for idx, scene in enumerate(scenes):
-        input_path = scene.get("visual_path")
-        duration = float(scene.get("duration", 3.0))
+        input_path = Path(scene.get("visual_path"))
+        duration = float(scene.get("duration", 3.5))
         output_path = work_dir / f"clip_{idx:03d}.mp4"
         frames = int(duration * fps)
         
-        filter_complex = (
-            f"zoompan=z='min(zoom+0.0015,1.4)':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',"
-            f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
-        )
+        is_image = input_path.suffix.lower() in [".jpg", ".jpeg", ".png"]
         
-        cmd = [
-            FFMPEG_BIN, "-y",
-            "-loop", "1", "-i", str(input_path),
-            "-t", str(duration),
-            "-filter_complex", filter_complex,
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps),
-            str(output_path)
-        ]
+        if is_image:
+            # Traitement pour image fixe : boucle + effet zoompan
+            filter_complex = (
+                f"zoompan=z='min(zoom+0.0015,1.4)':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',"
+                f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
+            )
+            cmd = [
+                FFMPEG_BIN, "-y",
+                "-loop", "1",
+                "-i", str(input_path),
+                "-t", str(duration),
+                "-filter_complex", filter_complex,
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps),
+                str(output_path)
+            ]
+        else:
+            # Traitement pour séquence vidéo (ex: MP4 Pexels)
+            filter_complex = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
+            cmd = [
+                FFMPEG_BIN, "-y",
+                "-stream_loop", "-1",
+                "-i", str(input_path),
+                "-t", str(duration),
+                "-filter_complex", filter_complex,
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps),
+                str(output_path)
+            ]
+            
         run_command(cmd)
         if output_path.exists():
             clips.append(output_path)
@@ -245,7 +261,7 @@ def generate_video_pipeline(
         item["duration"] = 3.5 
         scenes.append(item)
 
-    log("🎞️ Assemblage des clips et effets de caméra...")
+    log("🎞️ Assemblage des clips et mise au format...")
     clips = create_scene_clips(scenes, work_dir, width, height)
     
     list_file = work_dir / "concat.txt"
@@ -313,12 +329,10 @@ def main():
             if not raw_ai:
                 raise RuntimeError("L'IA n'a renvoyé aucune donnée texte.")
             
-            # Nettoyage et extraction ultra-sécurisée du JSON
             clean_ai = raw_ai.strip()
             clean_ai = re.sub(r"^\x60{3}(?:json)?\s*", "", clean_ai, flags=re.IGNORECASE)
             clean_ai = re.sub(r"\s*\x60{3}$", "", clean_ai)
             
-            # Recherche uniquement du bloc JSON entre accolades
             json_match = re.search(r"\{.*\}", clean_ai, re.DOTALL)
             if json_match:
                 clean_ai = json_match.group(0)
