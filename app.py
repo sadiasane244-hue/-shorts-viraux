@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import re
 import shutil
 import subprocess
 import requests
@@ -29,7 +30,7 @@ FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
 AUDIO_BITRATE = "192k"
 
-# Cartographie des mascottes (à placer à la racine avec app.py)
+# Cartographie des mascottes (à placer à la racine)
 MASCOT_FILES = {
     "default": BASE_DIR / "mascot_default.png",
     "thinking": BASE_DIR / "mascot_thinking.png",
@@ -71,8 +72,8 @@ SYSTEM_PROMPT = """Tu es un créateur de contenu star spécialisé en psychologi
 Ton ton est dynamique, captivant, drôle et légèrement sarcastique.
 
 TU DOIS PRODUIRE DEUX SCRIPTS DANS LE MÊME RETOUR JSON :
-1. "script": Le script d'une vidéo longue et détaillée (environ 150-250 mots).
-2. "teaser_script": Le script d'un teaser ultra-court (max 45 mots) conçu pour captiver en 3 secondes et renvoyer vers la vidéo longue.
+1. "script_long": Le script d'une vidéo longue et détaillée (environ 150-250 mots).
+2. "script_teaser": Le script d'un teaser ultra-court (max 45 mots) conçu pour captiver en 3 secondes et renvoyer vers la vidéo longue.
 
 DÉCOUPAGE ET ÉMOTIONS :
 Associe les phrases à une émotion parmi : ["default", "thinking", "confused", "laughing", "explaining", "surprised"].
@@ -149,46 +150,7 @@ def download_file(url: str, dest_path: Path) -> bool:
         return False
 
 # ============================================================
-# SOUS-TITRES DYNAMIQUES (.ASS / KARAOKÉ)
-# ============================================================
-
-def generate_ass_subtitles(boundaries: List[Dict], output_ass_path: Path, width: int, height: int):
-    font_size = int(height / 18)
-    margin_v = int(height * 0.25)
-    
-    header = f"""[Script Info]
-ScriptType: v4.00+
-PlayResX: {width}
-PlayResY: {height}
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: TikTok,Arial,{font_size},&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,0,2,10,10,{margin_v},1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-    events = []
-    for b in boundaries:
-        word = str(b.get("word", "")).upper().replace("'", "\\'")
-        start_t = format_ass_time(float(b.get("start", 0)))
-        end_t = format_ass_time(float(b.get("end", 0)))
-        
-        line = f"Dialogue: 0,{start_t},{end_t},TikTok,,0,0,0,,{{\\c&H0000FFFF&\\t(0,0.1,\\c&H00FFFFFF&)}} {word}"
-        events.append(line)
-        
-    with open(output_ass_path, "w", encoding="utf-8") as f:
-        f.write(header + "\n".join(events))
-
-def format_ass_time(seconds: float) -> str:
-    hrs = int(seconds // 3600)
-    mins = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    centis = int((seconds % 1) * 100)
-    return f"{hrs:01d}:{mins:02d}:{secs:02d}.{centis:02d}"
-
-# ============================================================
-# PRODUCTION VIDEO & MIX AUDIO (Zéro Musique)
+# PRODUCTION VIDEO
 # ============================================================
 
 def create_scene_clips(scenes: List[Dict], work_dir: Path, width: int, height: int) -> List[Path]:
@@ -219,21 +181,6 @@ def create_scene_clips(scenes: List[Dict], work_dir: Path, width: int, height: i
             clips.append(output_path)
             
     return clips
-
-def process_audio(narration_path: Path, output_audio_path: Path, duration: float) -> Path:
-    """
-    Traite la voix off (narration) et assure le bon format audio.
-    Aucune musique de fond n'est ajoutée ici.
-    """
-    cmd = [
-        FFMPEG_BIN, "-y", 
-        "-i", str(narration_path),
-        "-c:a", "aac", "-b:a", AUDIO_BITRATE,
-        "-t", str(duration),
-        str(output_audio_path)
-    ]
-    run_command(cmd)
-    return output_audio_path
 
 # ============================================================
 # PIPELINE GLOBAL DE GENERATION
@@ -289,7 +236,6 @@ def generate_video_pipeline(
     
     final_output = OUTPUT_DIR / f"studio_{int(time.time())}_{video_format}.mp4"
     
-    # Intégration de la mascotte par défaut (peut être amélioré pour changer par scène)
     mascot_img = MASCOT_FILES.get("default", BASE_DIR / "mascot_default.png")
     
     overlay_cmd = [
@@ -340,9 +286,34 @@ def main():
             
             raw_ai = call_openrouter(topic)
             
-            # Nettoyage de la réponse IA si entourée de backticks
+            # Nettoyage ultra-robuste avec regex ASCII (évite les erreurs de syntaxe)
             clean_ai = raw_ai.strip()
-            if clean_ai.startswith("
-http://googleusercontent.com/immersive_entry_chip/0
-http://googleusercontent.com/immersive_entry_chip/1
-http://googleusercontent.com/immersive_entry_chip/2
+            clean_ai = re.sub(r"^\x60{3}(?:json)?\s*", "", clean_ai, flags=re.IGNORECASE)
+            clean_ai = re.sub(r"\s*\x60{3}$", "", clean_ai)
+            clean_ai = clean_ai.strip()
+            
+            ai_data = json.loads(clean_ai)
+            
+            if mode in ["pack_complete", "long_only"]:
+                status.info("💻 Production de la vidéo longue YouTube (16:9)...")
+                progress.progress(40)
+                long_path = generate_video_pipeline(ai_data.get("script_long", []), "paysage", status.info)
+                st.subheader("💻 Vidéo Longue (YouTube 16:9)")
+                st.video(str(long_path))
+                
+            if mode in ["pack_complete", "short_only"]:
+                status.info("📱 Production du Teaser Vertical (9:16)...")
+                progress.progress(75)
+                short_path = generate_video_pipeline(ai_data.get("script_teaser", []), "portrait", status.info)
+                st.subheader("📱 Teaser (TikTok / Shorts 9:16)")
+                st.video(str(short_path))
+                
+            progress.progress(100)
+            status.success("🎉 Production terminée avec succès !")
+            
+        except Exception as e:
+            progress.progress(100)
+            status.error(f"Erreur durant la génération : {e}")
+
+if __name__ == "__main__":
+    main()
