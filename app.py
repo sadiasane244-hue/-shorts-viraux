@@ -30,7 +30,7 @@ FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
 AUDIO_BITRATE = "192k"
 
-# Cartographie des mascottes (à placer à la racine)
+# Cartographie des mascottes (à placer à la racine avec app.py)
 MASCOT_FILES = {
     "default": BASE_DIR / "mascot_default.png",
     "thinking": BASE_DIR / "mascot_thinking.png",
@@ -101,7 +101,7 @@ def call_openrouter(topic: str) -> str:
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "google/gemini-2.5-flash",
+        "model": "openrouter/free",  # Utilisation du modèle 100% gratuit
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": f"Sujet de la vidéo : {topic}"}
