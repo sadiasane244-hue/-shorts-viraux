@@ -92,7 +92,7 @@ CHOIX DE FORMATS POSSIBLES (Choisis-en UN SEUL) :
 
 CONTRAINTES :
 - Chaque scène doit avoir : "text", "emotion" (parmi ["default", "thinking", "confused", "laughing", "explaining", "surprised"]), et "visual_query" (1 à 3 mots max en Anglais, ex: "brain", "scared man").
-- Si tu choisis "long_plus_teaser", le script du teaser DOIT obligatoirement se terminer par une phrase appelant à regarder la vidéo complète.
+- Si tu choisis "long_plus_teaser", le script du teaser DOIT obligatoirement se terminer par une phrase appelant à regarder la vidéo complète sur la chaîne.
 
 RÉPONDS UNIQUEMENT AVEC CE JSON EXACT (AUCUN TEXTE AUTOUR) :
 {
@@ -105,17 +105,27 @@ RÉPONDS UNIQUEMENT AVEC CE JSON EXACT (AUCUN TEXTE AUTOUR) :
 }
 """
 
-def call_openrouter_with_retry(topic: str, retries: int = 2) -> Dict:
+def call_openrouter_with_retry(topic: str, status_cb, retries: int = 2) -> Dict:
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError("Clé API OpenRouter manquante.")
+
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
         "HTTP-Referer": "https://streamlit.io"
     }
-    models = ["google/gemini-2.0-flash-exp:free", "google/gemini-2.0-flash-lite-001:free", "meta-llama/llama-3.3-70b-instruct:free"]
     
+    models = [
+        "google/gemini-2.0-flash-exp:free", 
+        "google/gemini-2.0-flash-lite-001:free", 
+        "meta-llama/llama-3.3-70b-instruct:free"
+    ]
+    
+    last_error = ""
     for attempt in range(retries):
         for model in models:
+            status_cb(f"🧠 IA en cours de rédaction... (Modèle: {model.split('/')[1]})")
             try:
                 payload = {
                     "model": model,
@@ -123,24 +133,39 @@ def call_openrouter_with_retry(topic: str, retries: int = 2) -> Dict:
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": f"Sujet : {topic}"}
                     ],
-                    "temperature": 0.7
+                    "temperature": 0.7,
+                    "max_tokens": 4000, # SÉCURITÉ: Empêche le script de se faire couper en plein milieu
+                    "response_format": {"type": "json_object"} # SÉCURITÉ: Force l'API à renvoyer uniquement du JSON
                 }
-                res = requests.post(url, json=payload, headers=headers, timeout=40)
+                res = requests.post(url, json=payload, headers=headers, timeout=50)
+                
                 if res.status_code == 200:
                     raw_text = res.json()["choices"][0]["message"]["content"].strip()
                     
-                    # Nettoyage Markdown
-                    clean_text = re.sub(r"^\x60{3}(?:json)?\s*", "", raw_text, flags=re.IGNORECASE)
-                    clean_text = re.sub(r"\s*\x60{3}$", "", clean_text)
-                    json_match = re.search(r"\{.*\}", clean_text, re.DOTALL)
-                    if json_match:
-                        clean_text = json_match.group(0)
+                    # Extraction robuste du JSON via Regex (ignorant le markdown)
+                    match = re.search(r'\{[\s\S]*\}', raw_text)
+                    if not match:
+                        raise ValueError("Aucun bloc JSON détecté dans la réponse.")
                         
-                    return json.loads(clean_text)
+                    clean_json_str = match.group(0)
+                    ai_data = json.loads(clean_json_str)
+                    
+                    # Vérification ultime de la structure
+                    if "script_principal" not in ai_data or not isinstance(ai_data["script_principal"], list):
+                        raise ValueError("Le JSON est valide mais la clé 'script_principal' est manquante ou incorrecte.")
+                        
+                    return ai_data
+                else:
+                    last_error = f"Erreur {res.status_code}: {res.text[:100]}"
+                    
+            except json.JSONDecodeError as e:
+                last_error = f"JSON mal formé (Tronqué ?). Erreur : {e}"
             except Exception as e:
-                print(f"Tentative {attempt+1} échouée avec {model}: {e}")
-                continue
-    raise RuntimeError("L'IA n'a pas réussi à générer un script valide après plusieurs tentatives.")
+                last_error = f"Exception : {e}"
+                
+            time.sleep(1) # Petite pause avant de réessayer un autre modèle
+            
+    raise RuntimeError(f"L'IA a échoué après toutes les tentatives.\nDernière erreur : {last_error}")
 
 # ============================================================
 # PEXELS & FALLBACK
@@ -148,7 +173,6 @@ def call_openrouter_with_retry(topic: str, retries: int = 2) -> Dict:
 
 def search_pexels_video(query: str, orientation: str) -> Optional[str]:
     if not PEXELS_API_KEY: return None
-    # On nettoie la requête pour éviter les échecs Pexels (garde juste les 3 premiers mots)
     words = [w for w in re.sub(r'[^a-zA-Z\s]', '', query).split() if len(w) > 2]
     clean_query = " ".join(words[:3])
     
@@ -208,14 +232,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         f.write(header + "\n".join(lines))
 
 def split_video_in_two(input_video: Path, total_duration: float, out_dir: Path) -> Tuple[Path, Path]:
-    """Coupe proprement la vidéo en deux parties égales (ré-encodage rapide pour précision audio/vidéo)."""
     mid_point = total_duration / 2.0
     part1 = out_dir / f"{input_video.stem}_Part1.mp4"
     part2 = out_dir / f"{input_video.stem}_Part2.mp4"
     
-    # Partie 1 (de 0 à mid_point)
     run_command([FFMPEG_BIN, "-y", "-i", str(input_video), "-t", str(mid_point), "-c:v", "libx264", "-preset", "fast", "-c:a", "aac", str(part1)])
-    # Partie 2 (de mid_point à la fin)
     run_command([FFMPEG_BIN, "-y", "-i", str(input_video), "-ss", str(mid_point), "-c:v", "libx264", "-preset", "fast", "-c:a", "aac", str(part2)])
     
     return part1, part2
@@ -225,6 +246,9 @@ def split_video_in_two(input_video: Path, total_duration: float, out_dir: Path) 
 # ============================================================
 
 def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status_cb) -> Path:
+    if not script_scenes:
+        raise ValueError(f"Le script pour le format '{video_format}' est vide.")
+
     work_dir = TEMP_DIR / f"run_{int(time.time())}_{video_format}"
     work_dir.mkdir(parents=True, exist_ok=True)
     
@@ -309,7 +333,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
 def main():
     st.set_page_config(page_title=APP_TITLE, page_icon="🧠", layout="centered")
     st.title("🧠 Cerveau Curieux — Studio IA Autonome")
-    st.markdown("Saisis simplement un sujet. L'IA décidera du meilleur format (Short unique, Short en 2 parties, ou Vidéo Longue + Teaser) et le générera automatiquement.")
+    st.markdown("Saisis un sujet. L'IA décidera du format idéal (Short unique, Short 2 parties, ou Vidéo Longue + Teaser) et le générera.")
 
     cleanup_old_temp_dirs()
 
@@ -327,7 +351,7 @@ def main():
             status.info("🧠 Analyse du sujet et choix du format par l'IA...")
             progress.progress(10)
             
-            ai_data = call_openrouter_with_retry(topic)
+            ai_data = call_openrouter_with_retry(topic, status.info)
             format_choisi = ai_data.get("format_choisi", "short_single")
             
             st.success(f"🎬 L'IA a choisi le format : **{format_choisi.replace('_', ' ').title()}**")
@@ -368,6 +392,8 @@ def main():
                 st.video(str(long_path))
                 st.subheader("📱 Teaser avec CTA (TikTok / Shorts 9:16)")
                 st.video(str(short_path))
+            else:
+                raise ValueError(f"Format inconnu choisi par l'IA : {format_choisi}")
 
             progress.progress(100)
             status.success("🎉 Production terminée avec succès !")
