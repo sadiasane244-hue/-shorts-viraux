@@ -5,16 +5,18 @@ import re
 import shutil
 import subprocess
 import requests
+import asyncio
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from PIL import Image
 import streamlit as st
+import edge_tts
 
 # ============================================================
 # CONFIGURATION ET PATHS DE BASE
 # ============================================================
 
-APP_TITLE = "🧠 Cerveau Curieux — Studio IA Ultime"
+APP_TITLE = "🧠 Cerveau Curieux — Studio IA Autonome"
 BASE_DIR = Path(__file__).resolve().parent
 TEMP_DIR = BASE_DIR / "temp"
 OUTPUT_DIR = BASE_DIR / "output"
@@ -40,7 +42,7 @@ MASCOT_FILES = {
 }
 
 # ============================================================
-# SÉCURITÉ : NETTOYAGE DU DISQUE & COMMANDES SHELL
+# SÉCURITÉ ET OUTILS SYSTEME
 # ============================================================
 
 def cleanup_old_temp_dirs(max_age_hours=1):
@@ -49,148 +51,108 @@ def cleanup_old_temp_dirs(max_age_hours=1):
         if item.is_dir():
             folder_age = now - item.stat().st_mtime
             if folder_age > (max_age_hours * 3600):
-                try:
-                    shutil.rmtree(item)
-                except Exception as e:
-                    print(f"⚠️ Impossible de supprimer {item}: {e}")
+                try: shutil.rmtree(item)
+                except Exception: pass
 
 def run_command(command: List[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
     try:
-        command_str = [str(arg) for arg in command]
-        result = subprocess.run(
-            command_str, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE, 
-            text=True, 
-            check=True,
-            cwd=cwd
-        )
-        return result
+        cmd_str = [str(arg) for arg in command]
+        return subprocess.run(cmd_str, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, cwd=cwd)
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Erreur Shell:\nCommande: {' '.join(command_str)}\nErreur: {e.stderr[-800:]}")
-
-# ============================================================
-# CONTRÔLE QUALITÉ (QC)
-# ============================================================
+        raise RuntimeError(f"Erreur Shell:\nCommande: {' '.join(cmd_str)}\nErreur: {e.stderr[-800:]}")
 
 def get_media_duration(file_path: Path) -> float:
-    if not file_path.exists() or file_path.stat().st_size == 0:
-        raise RuntimeError(f"Fichier invalide ou vide : {file_path.name}")
-    cmd = [
-        FFPROBE_BIN, "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-        str(file_path)
-    ]
+    if not file_path.exists() or file_path.stat().st_size == 0: return 0.0
+    cmd = [FFPROBE_BIN, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(file_path)]
     res = run_command(cmd)
-    try:
-        return float(res.stdout.strip())
-    except ValueError:
-        raise RuntimeError(f"Impossible de lire la durée du fichier {file_path.name}")
-
-def qc_validate_video(video_path: Path, min_duration: float):
-    if not video_path.exists():
-        raise RuntimeError("QC Échec: Le fichier final n'a pas été généré.")
-        
-    duration = get_media_duration(video_path)
-    if duration < min_duration:
-        raise RuntimeError(f"QC Échec: Vidéo trop courte ({duration:.1f}s au lieu de {min_duration}s). L'IA n'a pas écrit un script assez long.")
-        
-    cmd_audio = [
-        FFPROBE_BIN, "-v", "error", "-select_streams", "a",
-        "-show_entries", "stream=codec_type", "-of", "default=noprint_wrappers=1:nokey=1",
-        str(video_path)
-    ]
-    res_audio = run_command(cmd_audio)
-    if "audio" not in res_audio.stdout.lower():
-        raise RuntimeError("QC Échec: Le fichier MP4 final est muet (aucune piste audio trouvée).")
+    try: return float(res.stdout.strip())
+    except ValueError: return 0.0
 
 # ============================================================
-# TTS STABLE (VIA LIGNE DE COMMANDE)
+# EDGE-TTS
 # ============================================================
 
 def generate_tts(text: str, output_path: Path):
     cmd = ["edge-tts", "--voice", TTS_VOICE, "--text", text, "--write-media", str(output_path)]
     run_command(cmd)
     if not output_path.exists() or output_path.stat().st_size < 100:
-        raise RuntimeError("Génération TTS échouée (fichier vide ou non créé).")
+        raise RuntimeError("Génération TTS échouée.")
 
 # ============================================================
-# API IA - ROBUSTE
+# INTELLIGENCE ARTIFICIELLE (DIRECTEUR AUTO-FORMAT)
 # ============================================================
 
-SYSTEM_PROMPT = """Tu es un vulgarisateur scientifique captivant pour la chaîne 'Cerveau Curieux'.
-Tu dois produire un script détaillé et très riche pour garantir une durée de narration suffisante.
+SYSTEM_PROMPT = """Tu es le réalisateur IA de 'Cerveau Curieux'. 
+Analyse le sujet demandé par l'utilisateur et CHOISIS LE FORMAT IDÉAL en fonction de sa complexité.
 
-EXIGENCES VITALES :
-- Teaser (Shorts) : 150 mots minimum (6 à 8 scènes).
-- Vidéo Longue : 700 mots minimum (15 à 25 scènes détaillées).
+CHOIX DE FORMATS POSSIBLES (Choisis-en UN SEUL) :
+1. "short_single" : Sujet simple. Script de 120 à 150 mots (pour 45s à 60s).
+2. "short_twoparts" : Sujet dense. Script d'environ 250 mots (pour ~1m40s). Le système le coupera en 2 épisodes.
+3. "long_plus_teaser" : Sujet complexe. Script principal TRES LONG (>450 mots pour >2m50s) ET un script teaser de ~70 mots.
 
-POUR CHAQUE SCÈNE, FOURNIS UN TEXTE, UNE ÉMOTION PARMI ["default", "thinking", "confused", "laughing", "explaining", "surprised"], ET UNE REQUÊTE VISUELLE CLAIRE (EN ANGLAIS).
+CONTRAINTES :
+- Chaque scène doit avoir : "text", "emotion" (parmi ["default", "thinking", "confused", "laughing", "explaining", "surprised"]), et "visual_query" (1 à 3 mots max en Anglais, ex: "brain", "scared man").
+- Si tu choisis "long_plus_teaser", le script du teaser DOIT obligatoirement se terminer par une phrase appelant à regarder la vidéo complète.
 
-STRUCTURE JSON STRICTE (SANS MARKDOWN REQUIS) :
+RÉPONDS UNIQUEMENT AVEC CE JSON EXACT (AUCUN TEXTE AUTOUR) :
 {
-  "title": "Titre explicatif",
-  "script_long": [
-    {"text": "Avez-vous déjà remarqué comment...", "emotion": "explaining", "visual_query": "human brain memory"}
+  "format_choisi": "short_single",
+  "title": "Titre de la vidéo",
+  "script_principal": [
+    {"text": "Saviez-vous que...", "emotion": "surprised", "visual_query": "shocked person"}
   ],
-  "script_teaser": [
-    {"text": "Votre cerveau vous trompe...", "emotion": "surprised", "visual_query": "optical illusion mind"}
-  ]
+  "script_teaser": []
 }
 """
 
-def call_openrouter(topic: str) -> str:
-    if not OPENROUTER_API_KEY:
-        raise RuntimeError("Clé API OpenRouter manquante (OPENROUTER_API_KEY).")
-        
+def call_openrouter_with_retry(topic: str, retries: int = 2) -> Dict:
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://streamlit.io",
-        "X-Title": "Cerveau Curieux Studio"
+        "HTTP-Referer": "https://streamlit.io"
     }
+    models = ["google/gemini-2.0-flash-exp:free", "google/gemini-2.0-flash-lite-001:free", "meta-llama/llama-3.3-70b-instruct:free"]
     
-    models = [
-        "google/gemini-2.0-flash-exp:free",
-        "google/gemini-2.0-flash-lite-001:free",
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "openrouter/auto"
-    ]
-    
-    errors = []
-    for model in models:
-        try:
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"Sujet détaillé : {topic}"}
-                ],
-                "temperature": 0.7
-            }
-            res = requests.post(url, json=payload, headers=headers, timeout=40)
-            if res.status_code == 200:
-                content = res.json().get("choices", [])[0].get("message", {}).get("content", "")
-                if content.strip():
-                    return content
-            else:
-                errors.append(f"HTTP {res.status_code}")
-        except Exception as e:
-            errors.append(str(e)[:50])
-            continue
-            
-    raise RuntimeError(f"Toutes les IA ont échoué. Raisons : {', '.join(errors)}")
+    for attempt in range(retries):
+        for model in models:
+            try:
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": f"Sujet : {topic}"}
+                    ],
+                    "temperature": 0.7
+                }
+                res = requests.post(url, json=payload, headers=headers, timeout=40)
+                if res.status_code == 200:
+                    raw_text = res.json()["choices"][0]["message"]["content"].strip()
+                    
+                    # Nettoyage Markdown
+                    clean_text = re.sub(r"^\x60{3}(?:json)?\s*", "", raw_text, flags=re.IGNORECASE)
+                    clean_text = re.sub(r"\s*\x60{3}$", "", clean_text)
+                    json_match = re.search(r"\{.*\}", clean_text, re.DOTALL)
+                    if json_match:
+                        clean_text = json_match.group(0)
+                        
+                    return json.loads(clean_text)
+            except Exception as e:
+                print(f"Tentative {attempt+1} échouée avec {model}: {e}")
+                continue
+    raise RuntimeError("L'IA n'a pas réussi à générer un script valide après plusieurs tentatives.")
 
 # ============================================================
 # PEXELS & FALLBACK
 # ============================================================
 
 def search_pexels_video(query: str, orientation: str) -> Optional[str]:
-    if not PEXELS_API_KEY:
-        return None
-    url = f"https://api.pexels.com/videos/search?query={query}&orientation={orientation}&per_page=3"
+    if not PEXELS_API_KEY: return None
+    # On nettoie la requête pour éviter les échecs Pexels (garde juste les 3 premiers mots)
+    words = [w for w in re.sub(r'[^a-zA-Z\s]', '', query).split() if len(w) > 2]
+    clean_query = " ".join(words[:3])
+    
+    url = f"https://api.pexels.com/videos/search?query={clean_query}&orientation={orientation}&per_page=5"
     headers = {"Authorization": PEXELS_API_KEY}
     try:
         r = requests.get(url, headers=headers, timeout=10)
@@ -200,8 +162,7 @@ def search_pexels_video(query: str, orientation: str) -> Optional[str]:
                 for f in files:
                     if ".mp4" in str(f.get("link", "")).lower():
                         return f.get("link")
-    except Exception:
-        pass
+    except Exception: pass
     return None
 
 def download_file(url: str, dest: Path) -> bool:
@@ -209,14 +170,12 @@ def download_file(url: str, dest: Path) -> bool:
         with requests.get(url, stream=True, timeout=15) as r:
             r.raise_for_status()
             with open(dest, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
         return True
-    except Exception:
-        return False
+    except Exception: return False
 
 # ============================================================
-# SOUS-TITRES ASS
+# SOUS-TITRES & DECOUPAGE (SPLIT)
 # ============================================================
 
 def create_ass_subtitles(scenes: List[Dict], output_ass: Path, width: int, height: int):
@@ -241,7 +200,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         duration = scene["duration"]
         start_t = time.strftime('%H:%M:%S', time.gmtime(current_time)) + f".{int((current_time % 1)*100):02d}"
         end_t = time.strftime('%H:%M:%S', time.gmtime(current_time + duration)) + f".{int(((current_time + duration) % 1)*100):02d}"
-        
         text = scene["text"].replace("\n", " ").replace('"', '')
         lines.append(f"Dialogue: 0,{start_t},{end_t},Default,,0,0,0,,{text}")
         current_time += duration
@@ -249,11 +207,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     with open(output_ass, "w", encoding="utf-8") as f:
         f.write(header + "\n".join(lines))
 
+def split_video_in_two(input_video: Path, total_duration: float, out_dir: Path) -> Tuple[Path, Path]:
+    """Coupe proprement la vidéo en deux parties égales (ré-encodage rapide pour précision audio/vidéo)."""
+    mid_point = total_duration / 2.0
+    part1 = out_dir / f"{input_video.stem}_Part1.mp4"
+    part2 = out_dir / f"{input_video.stem}_Part2.mp4"
+    
+    # Partie 1 (de 0 à mid_point)
+    run_command([FFMPEG_BIN, "-y", "-i", str(input_video), "-t", str(mid_point), "-c:v", "libx264", "-preset", "fast", "-c:a", "aac", str(part1)])
+    # Partie 2 (de mid_point à la fin)
+    run_command([FFMPEG_BIN, "-y", "-i", str(input_video), "-ss", str(mid_point), "-c:v", "libx264", "-preset", "fast", "-c:a", "aac", str(part2)])
+    
+    return part1, part2
+
 # ============================================================
-# PIPELINE DE PRODUCTION SYNCHRONISÉ SUR L'AUDIO & MASCOTTE DYNAMIQUE
+# PIPELINE DE PRODUCTION GLOBAL
 # ============================================================
 
-def generate_video_pipeline(script_scenes: List[Dict], video_format: str, min_target_duration: float, status_cb) -> Path:
+def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status_cb) -> Path:
     work_dir = TEMP_DIR / f"run_{int(time.time())}_{video_format}"
     work_dir.mkdir(parents=True, exist_ok=True)
     
@@ -263,41 +234,33 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, min_ta
     # 1. AUDIO TTS
     status_cb("🎙️ Génération de la voix off (Edge-TTS)...")
     audio_clips = []
+    total_duration = 0.0
     for idx, scene in enumerate(script_scenes):
         audio_file = work_dir / f"audio_{idx:03d}.mp3"
         generate_tts(scene["text"], audio_file)
-        scene["duration"] = get_media_duration(audio_file)
+        dur = get_media_duration(audio_file)
+        scene["duration"] = dur
+        total_duration += dur
         audio_clips.append(audio_file)
 
-    concat_audio_list = work_dir / "concat_audio.txt"
-    with open(concat_audio_list, "w") as f:
-        for a in audio_clips:
-            f.write(f"file '{a.name}'\n")
-            
-    full_audio = work_dir / "full_audio.mp3"
+    with open(work_dir / "concat_audio.txt", "w") as f:
+        for a in audio_clips: f.write(f"file '{a.name}'\n")
     run_command([FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", "concat_audio.txt", "-c", "copy", "full_audio.mp3"], cwd=work_dir)
 
-    # 2. VISUELS & MASCOTTE DYNAMIQUE SCÈNE PAR SCÈNE
-    status_cb("🎥 Téléchargement des visuels et intégration dynamique de la mascotte...")
+    # 2. VISUELS & MASCOTTE SCÈNE PAR SCÈNE
+    status_cb("🎥 Assemblage des visuels et de la mascotte...")
     video_clips = []
     fps = 25
     
-    if video_format == "portrait":
-        mascot_scale = int(width * 0.22)
-        pos_x = "(W-w)/2"
-        pos_y = "H-h-450"
-    else:
-        mascot_scale = int(width * 0.15)
-        pos_x = "40"
-        pos_y = "H-h-40"
+    mascot_scale = int(width * 0.22) if video_format == "portrait" else int(width * 0.15)
+    pos_x = "(W-w)/2" if video_format == "portrait" else "40"
+    pos_y = "H-h-450" if video_format == "portrait" else "H-h-40"
 
     for idx, scene in enumerate(script_scenes):
         duration = scene["duration"]
         emotion = scene.get("emotion", "default")
-        
         mascot_img = MASCOT_FILES.get(emotion, MASCOT_FILES["default"])
-        if not mascot_img.exists():
-            mascot_img = MASCOT_FILES.get("default")
+        if not mascot_img.exists(): mascot_img = MASCOT_FILES.get("default")
 
         url = search_pexels_video(scene.get("visual_query", "science"), orientation)
         visual_file = work_dir / f"src_vis_{idx:03d}.mp4"
@@ -308,84 +271,51 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, min_ta
 
         if url and download_file(url, visual_file):
             base_filter = f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}[bg]"
-            input_file = visual_file.name
-            cmd = [FFMPEG_BIN, "-y", "-stream_loop", "-1", "-i", input_file, "-i", str(mascot_img.resolve())]
+            cmd = [FFMPEG_BIN, "-y", "-stream_loop", "-1", "-i", visual_file.name, "-i", str(mascot_img.resolve())]
         else:
             fallback = work_dir / f"fallback_{idx:03d}.png"
             Image.new("RGB", (width, height), color=(30, 30, 45)).save(fallback)
             frames = int(duration * fps)
             base_filter = f"[0:v]zoompan=z='min(zoom+0.0015,1.3)':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',scale={width}:{height}[bg]"
-            input_file = fallback.name
-            cmd = [FFMPEG_BIN, "-y", "-loop", "1", "-i", input_file, "-i", str(mascot_img.resolve())]
+            cmd = [FFMPEG_BIN, "-y", "-loop", "1", "-i", fallback.name, "-i", str(mascot_img.resolve())]
 
-        filter_complex = (
-            f"{base_filter};"
-            f"[1:v]scale={mascot_scale}:-1[mascot];"
-            f"[bg][mascot]overlay=x={pos_x}:y={pos_y}:enable='{enable_expr}'[v_out]"
-        )
-
-        cmd.extend([
-            "-t", str(duration), 
-            "-filter_complex", filter_complex, 
-            "-map", "[v_out]", 
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), 
-            output_clip.name
-        ])
-        
+        filter_complex = f"{base_filter};[1:v]scale={mascot_scale}:-1[mascot];[bg][mascot]overlay=x={pos_x}:y={pos_y}:enable='{enable_expr}'[v_out]"
+        cmd.extend(["-t", str(duration), "-filter_complex", filter_complex, "-map", "[v_out]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), output_clip.name])
         run_command(cmd, cwd=work_dir)
         video_clips.append(output_clip)
 
-    concat_video_list = work_dir / "concat_video.txt"
-    with open(concat_video_list, "w") as f:
-        for v in video_clips:
-            f.write(f"file '{v.name}'\n")
-            
-    raw_video = work_dir / "raw_video.mp4"
+    with open(work_dir / "concat_video.txt", "w") as f:
+        for v in video_clips: f.write(f"file '{v.name}'\n")
     run_command([FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", "concat_video.txt", "-c", "copy", "raw_video.mp4"], cwd=work_dir)
 
     # 3. SOUS-TITRES & MIXAGE FINAL
-    status_cb("⚙️ Incrustation ASS et mixage final...")
-    ass_file = work_dir / "subtitles.ass"
-    create_ass_subtitles(script_scenes, ass_file, width, height)
+    status_cb("⚙️ Incrustation des sous-titres et mixage final...")
+    create_ass_subtitles(script_scenes, work_dir / "subtitles.ass", width, height)
 
     final_output = OUTPUT_DIR / f"export_{int(time.time())}_{video_format}.mp4"
-    
     cmd_final = [
         FFMPEG_BIN, "-y", "-i", "raw_video.mp4", "-i", "full_audio.mp3",
         "-vf", "subtitles=subtitles.ass", "-map", "0:v", "-map", "1:a",
         "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k", "-shortest", str(final_output.resolve())
     ]
-        
     run_command(cmd_final, cwd=work_dir)
-
-    # 4. QUALITÉ
-    status_cb("🔍 Contrôle Qualité FFprobe...")
-    qc_validate_video(final_output, min_target_duration)
     
     return final_output
 
 # ============================================================
-# INTERFACE
+# INTERFACE STREAMLIT
 # ============================================================
 
 def main():
     st.set_page_config(page_title=APP_TITLE, page_icon="🧠", layout="centered")
-    st.title("🧠 Cerveau Curieux — Studio IA")
+    st.title("🧠 Cerveau Curieux — Studio IA Autonome")
+    st.markdown("Saisis simplement un sujet. L'IA décidera du meilleur format (Short unique, Short en 2 parties, ou Vidéo Longue + Teaser) et le générera automatiquement.")
 
     cleanup_old_temp_dirs()
 
-    topic = st.text_area("Sujet de la vidéo :", placeholder="Ex: Comment le cerveau fabrique-t-il les souvenirs ?")
-    mode = st.selectbox(
-        "Format de création :",
-        ["pack_complete", "short_only", "long_only"],
-        format_func=lambda x: {
-            "pack_complete": "🔥 Pack Ultime : Vidéo Longue (16:9) + Teaser Vertical (9:16)",
-            "short_only": "📱 Teaser / Short Seul (9:16)",
-            "long_only": "💻 Vidéo Longue YouTube Seule (16:9)"
-        }[x]
-    )
+    topic = st.text_area("Sujet de la vidéo :", placeholder="Ex: L'effet Mandela, pourquoi notre cerveau invente des souvenirs ?")
 
-    if st.button("🚀 Lancer la production", type="primary"):
+    if st.button("🚀 Lancer la production automatique", type="primary"):
         if not topic.strip():
             st.error("Veuillez saisir un sujet.")
             return
@@ -394,37 +324,53 @@ def main():
         progress = st.progress(0)
 
         try:
-            status.info("🧠 Génération du script enrichi via l'IA...")
+            status.info("🧠 Analyse du sujet et choix du format par l'IA...")
             progress.progress(10)
             
-            raw_ai = call_openrouter(topic)
+            ai_data = call_openrouter_with_retry(topic)
+            format_choisi = ai_data.get("format_choisi", "short_single")
             
-            try:
-                clean_ai = re.sub(r"^\x60{3}(?:json)?\s*", "", raw_ai.strip(), flags=re.IGNORECASE)
-                clean_ai = re.sub(r"\s*\x60{3}$", "", clean_ai)
-                json_match = re.search(r"\{.*\}", clean_ai, re.DOTALL)
-                if json_match:
-                    clean_ai = json_match.group(0)
-                ai_data = json.loads(clean_ai)
-            except json.JSONDecodeError as e:
-                raise RuntimeError(f"Le format de réponse de l'IA est invalide. Relancez la génération. Détail : {e}")
+            st.success(f"🎬 L'IA a choisi le format : **{format_choisi.replace('_', ' ').title()}**")
 
-            if mode in ["pack_complete", "short_only"]:
-                status.info("📱 Préparation du Teaser Vertical (cible min. 25s)...")
+            if format_choisi == "short_single":
+                status.info("📱 Production du Short (45-60s)...")
                 progress.progress(40)
-                short_path = generate_video_pipeline(ai_data.get("script_teaser", []), "portrait", 25.0, status.info)
-                st.subheader("📱 Teaser (TikTok / Shorts 9:16)")
-                st.video(str(short_path))
+                video_path = generate_video_pipeline(ai_data.get("script_principal", []), "portrait", status.info)
+                st.video(str(video_path))
 
-            if mode in ["pack_complete", "long_only"]:
-                status.info("💻 Préparation de la Vidéo Longue (cible min. 50s)...")
+            elif format_choisi == "short_twoparts":
+                status.info("✂️ Production du Short Long (~1m40s) et découpage en 2 parties...")
+                progress.progress(40)
+                full_video_path = generate_video_pipeline(ai_data.get("script_principal", []), "portrait", status.info)
+                
+                status.info("✂️ Découpage en cours...")
+                total_duration = get_media_duration(full_video_path)
+                part1, part2 = split_video_in_two(full_video_path, total_duration, OUTPUT_DIR)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Partie 1")
+                    st.video(str(part1))
+                with col2:
+                    st.subheader("Partie 2")
+                    st.video(str(part2))
+
+            elif format_choisi == "long_plus_teaser":
+                status.info("💻 Production de la Vidéo Longue (16:9)...")
+                progress.progress(30)
+                long_path = generate_video_pipeline(ai_data.get("script_principal", []), "landscape", status.info)
+                
+                status.info("📱 Production du Teaser Vertical (9:16) avec Appel à l'Action...")
                 progress.progress(70)
-                long_path = generate_video_pipeline(ai_data.get("script_long", []), "landscape", 50.0, status.info)
+                short_path = generate_video_pipeline(ai_data.get("script_teaser", []), "portrait", status.info)
+                
                 st.subheader("💻 Vidéo Longue (YouTube 16:9)")
                 st.video(str(long_path))
+                st.subheader("📱 Teaser avec CTA (TikTok / Shorts 9:16)")
+                st.video(str(short_path))
 
             progress.progress(100)
-            status.success("🎉 Production terminée et certifiée sans erreur !")
+            status.success("🎉 Production terminée avec succès !")
 
         except Exception as e:
             progress.progress(100)
