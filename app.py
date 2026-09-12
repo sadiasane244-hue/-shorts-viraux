@@ -18,7 +18,7 @@ from google.genai import types
 # ============================================================
 
 APP_TITLE = "🧠 Cerveau Curieux — Studio IA Autonome"
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path.cwd()
 TEMP_DIR = BASE_DIR / "temp"
 OUTPUT_DIR = BASE_DIR / "output"
 
