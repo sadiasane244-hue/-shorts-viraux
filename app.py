@@ -5,12 +5,13 @@ import re
 import shutil
 import subprocess
 import requests
-import asyncio
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from PIL import Image
 import streamlit as st
-import edge_tts
+from pydantic import BaseModel, Field
+from google import genai
+from google.genai import types
 
 # ============================================================
 # CONFIGURATION ET PATHS DE BASE
@@ -25,7 +26,7 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
@@ -40,6 +41,21 @@ MASCOT_FILES = {
     "explaining": BASE_DIR / "mascot_explaining.png",
     "surprised": BASE_DIR / "mascot_surprised.png",
 }
+
+# ============================================================
+# STRUCTURE D'OUTPUT JSON STRICTE (PYDANTIC)
+# ============================================================
+
+class Scene(BaseModel):
+    text: str = Field(description="Texte de la narration pour la scène")
+    emotion: str = Field(description="Émotion parmi: default, thinking, confused, laughing, explaining, surprised")
+    visual_query: str = Field(description="Mots-clés visuels en anglais (1 à 3 mots max, ex: brain, scared man)")
+
+class ScriptOutput(BaseModel):
+    format_choisi: str = Field(description="Choix parmi: short_single, short_twoparts, long_plus_teaser")
+    title: str = Field(description="Titre captivant de la vidéo")
+    script_principal: List[Scene] = Field(description="Scènes de la vidéo principale")
+    script_teaser: List[Scene] = Field(default=[], description="Scènes du teaser si le format long_plus_teaser est choisi")
 
 # ============================================================
 # SÉCURITÉ ET OUTILS SYSTEME
@@ -68,6 +84,18 @@ def get_media_duration(file_path: Path) -> float:
     try: return float(res.stdout.strip())
     except ValueError: return 0.0
 
+def qc_validate_video(video_path: Path):
+    if not video_path.exists():
+        raise RuntimeError("QC Échec: Le fichier final n'a pas été généré.")
+    cmd_audio = [
+        FFPROBE_BIN, "-v", "error", "-select_streams", "a",
+        "-show_entries", "stream=codec_type", "-of", "default=noprint_wrappers=1:nokey=1",
+        str(video_path)
+    ]
+    res_audio = run_command(cmd_audio)
+    if "audio" not in res_audio.stdout.lower():
+        raise RuntimeError("QC Échec: Le fichier MP4 final est muet (aucune piste audio trouvée).")
+
 # ============================================================
 # EDGE-TTS
 # ============================================================
@@ -76,10 +104,10 @@ def generate_tts(text: str, output_path: Path):
     cmd = ["edge-tts", "--voice", TTS_VOICE, "--text", text, "--write-media", str(output_path)]
     run_command(cmd)
     if not output_path.exists() or output_path.stat().st_size < 100:
-        raise RuntimeError("Génération TTS échouée.")
+        raise RuntimeError(f"Génération TTS échouée pour le texte : {text[:30]}...")
 
 # ============================================================
-# INTELLIGENCE ARTIFICIELLE (DIRECTEUR AUTO-FORMAT)
+# GENERATION VIA SDK GEMINI OFFICIEL (GRATUIT & ULTRA STABLE)
 # ============================================================
 
 SYSTEM_PROMPT = """Tu es le réalisateur IA de 'Cerveau Curieux'. 
@@ -87,85 +115,40 @@ Analyse le sujet demandé par l'utilisateur et CHOISIS LE FORMAT IDÉAL en fonct
 
 CHOIX DE FORMATS POSSIBLES (Choisis-en UN SEUL) :
 1. "short_single" : Sujet simple. Script de 120 à 150 mots (pour 45s à 60s).
-2. "short_twoparts" : Sujet dense. Script d'environ 250 mots (pour ~1m40s). Le système le coupera en 2 épisodes.
+2. "short_twoparts" : Sujet dense. Script d'environ 250 mots (pour ~1m40s). Le système le coupera ensuite en 2.
 3. "long_plus_teaser" : Sujet complexe. Script principal TRES LONG (>450 mots pour >2m50s) ET un script teaser de ~70 mots.
 
 CONTRAINTES :
-- Chaque scène doit avoir : "text", "emotion" (parmi ["default", "thinking", "confused", "laughing", "explaining", "surprised"]), et "visual_query" (1 à 3 mots max en Anglais, ex: "brain", "scared man").
-- Si tu choisis "long_plus_teaser", le script du teaser DOIT obligatoirement se terminer par une phrase appelant à regarder la vidéo complète sur la chaîne.
-
-RÉPONDS UNIQUEMENT AVEC CE JSON EXACT (AUCUN TEXTE AUTOUR) :
-{
-  "format_choisi": "short_single",
-  "title": "Titre de la vidéo",
-  "script_principal": [
-    {"text": "Saviez-vous que...", "emotion": "surprised", "visual_query": "shocked person"}
-  ],
-  "script_teaser": []
-}
+- Chaque scène doit respecter le schéma JSON fourni.
+- Si tu choisis "long_plus_teaser", le script du teaser DOIT obligatoirement se terminer par un appel à la vidéo complète sur la chaîne.
 """
 
-def call_openrouter_with_retry(topic: str, status_cb, retries: int = 2) -> Dict:
-    if not OPENROUTER_API_KEY:
-        raise RuntimeError("Clé API OpenRouter manquante.")
+def generate_script_gemini(topic: str, status_cb) -> Dict:
+    if not GEMINI_API_KEY:
+        raise RuntimeError("Clé API GEMINI_API_KEY manquante. Veuillez la configurer.")
 
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://streamlit.io"
-    }
-    
-    models = [
-        "google/gemini-2.0-flash-exp:free", 
-        "google/gemini-2.0-flash-lite-001:free", 
-        "meta-llama/llama-3.3-70b-instruct:free"
-    ]
-    
-    last_error = ""
-    for attempt in range(retries):
-        for model in models:
-            status_cb(f"🧠 IA en cours de rédaction... (Modèle: {model.split('/')[1]})")
-            try:
-                payload = {
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": f"Sujet : {topic}"}
-                    ],
-                    "temperature": 0.7,
-                    "max_tokens": 4000, # SÉCURITÉ: Empêche le script de se faire couper en plein milieu
-                    "response_format": {"type": "json_object"} # SÉCURITÉ: Force l'API à renvoyer uniquement du JSON
-                }
-                res = requests.post(url, json=payload, headers=headers, timeout=50)
-                
-                if res.status_code == 200:
-                    raw_text = res.json()["choices"][0]["message"]["content"].strip()
-                    
-                    # Extraction robuste du JSON via Regex (ignorant le markdown)
-                    match = re.search(r'\{[\s\S]*\}', raw_text)
-                    if not match:
-                        raise ValueError("Aucun bloc JSON détecté dans la réponse.")
-                        
-                    clean_json_str = match.group(0)
-                    ai_data = json.loads(clean_json_str)
-                    
-                    # Vérification ultime de la structure
-                    if "script_principal" not in ai_data or not isinstance(ai_data["script_principal"], list):
-                        raise ValueError("Le JSON est valide mais la clé 'script_principal' est manquante ou incorrecte.")
-                        
-                    return ai_data
-                else:
-                    last_error = f"Erreur {res.status_code}: {res.text[:100]}"
-                    
-            except json.JSONDecodeError as e:
-                last_error = f"JSON mal formé (Tronqué ?). Erreur : {e}"
-            except Exception as e:
-                last_error = f"Exception : {e}"
-                
-            time.sleep(1) # Petite pause avant de réessayer un autre modèle
-            
-    raise RuntimeError(f"L'IA a échoué après toutes les tentatives.\nDernière erreur : {last_error}")
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    status_cb("🧠 Analyse du sujet et rédaction du script via Gemini 2.5 Flash...")
+
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=f"Sujet : {topic}",
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                response_schema=ScriptOutput,
+                temperature=0.7,
+            ),
+        )
+        
+        # Extraction robuste (gère Pydantic automatique ou Fallback texte brut)
+        if hasattr(response, 'parsed') and response.parsed:
+            return response.parsed.model_dump()
+        return json.loads(response.text)
+
+    except Exception as e:
+        raise RuntimeError(f"Erreur lors de la génération avec Gemini Flash : {e}")
 
 # ============================================================
 # PEXELS & FALLBACK
@@ -272,7 +255,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
     run_command([FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", "concat_audio.txt", "-c", "copy", "full_audio.mp3"], cwd=work_dir)
 
     # 2. VISUELS & MASCOTTE SCÈNE PAR SCÈNE
-    status_cb("🎥 Assemblage des visuels et de la mascotte...")
+    status_cb("🎥 Assemblage des visuels et intégration dynamique de la mascotte...")
     video_clips = []
     fps = 25
     
@@ -324,6 +307,10 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
     ]
     run_command(cmd_final, cwd=work_dir)
     
+    # 4. QUALITÉ
+    status_cb("🔍 Contrôle Qualité Final...")
+    qc_validate_video(final_output)
+    
     return final_output
 
 # ============================================================
@@ -333,7 +320,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
 def main():
     st.set_page_config(page_title=APP_TITLE, page_icon="🧠", layout="centered")
     st.title("🧠 Cerveau Curieux — Studio IA Autonome")
-    st.markdown("Saisis un sujet. L'IA décidera du format idéal (Short unique, Short 2 parties, ou Vidéo Longue + Teaser) et le générera.")
+    st.markdown("Propulsé par **Google Gemini Flash** (SDK Officiel - 100% Gratuit, Structuré & Ultra Stable)")
 
     cleanup_old_temp_dirs()
 
@@ -348,26 +335,26 @@ def main():
         progress = st.progress(0)
 
         try:
-            status.info("🧠 Analyse du sujet et choix du format par l'IA...")
             progress.progress(10)
             
-            ai_data = call_openrouter_with_retry(topic, status.info)
+            # 1. Génération Intelligente via Gemini
+            ai_data = generate_script_gemini(topic, status.info)
             format_choisi = ai_data.get("format_choisi", "short_single")
             
-            st.success(f"🎬 L'IA a choisi le format : **{format_choisi.replace('_', ' ').title()}**")
+            st.success(f"🎬 Format automatiquement sélectionné : **{format_choisi.replace('_', ' ').title()}**")
 
+            # 2. Routage vers le bon pipeline selon le format
             if format_choisi == "short_single":
-                status.info("📱 Production du Short (45-60s)...")
                 progress.progress(40)
                 video_path = generate_video_pipeline(ai_data.get("script_principal", []), "portrait", status.info)
+                st.subheader("📱 Short / TikTok (9:16)")
                 st.video(str(video_path))
 
             elif format_choisi == "short_twoparts":
-                status.info("✂️ Production du Short Long (~1m40s) et découpage en 2 parties...")
                 progress.progress(40)
                 full_video_path = generate_video_pipeline(ai_data.get("script_principal", []), "portrait", status.info)
                 
-                status.info("✂️ Découpage en cours...")
+                status.info("✂️ Découpage de la vidéo en 2 parties égales...")
                 total_duration = get_media_duration(full_video_path)
                 part1, part2 = split_video_in_two(full_video_path, total_duration, OUTPUT_DIR)
                 
@@ -380,20 +367,18 @@ def main():
                     st.video(str(part2))
 
             elif format_choisi == "long_plus_teaser":
-                status.info("💻 Production de la Vidéo Longue (16:9)...")
                 progress.progress(30)
                 long_path = generate_video_pipeline(ai_data.get("script_principal", []), "landscape", status.info)
                 
-                status.info("📱 Production du Teaser Vertical (9:16) avec Appel à l'Action...")
                 progress.progress(70)
                 short_path = generate_video_pipeline(ai_data.get("script_teaser", []), "portrait", status.info)
                 
                 st.subheader("💻 Vidéo Longue (YouTube 16:9)")
                 st.video(str(long_path))
-                st.subheader("📱 Teaser avec CTA (TikTok / Shorts 9:16)")
+                st.subheader("📱 Teaser (TikTok / Shorts 9:16)")
                 st.video(str(short_path))
             else:
-                raise ValueError(f"Format inconnu choisi par l'IA : {format_choisi}")
+                raise ValueError(f"Format non reconnu : {format_choisi}")
 
             progress.progress(100)
             status.success("🎉 Production terminée avec succès !")
