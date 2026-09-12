@@ -49,11 +49,12 @@ MASCOT_FILES = {
 class Scene(BaseModel):
     text: str = Field(description="Texte de la narration pour la scène")
     emotion: str = Field(description="Émotion parmi: default, thinking, confused, laughing, explaining, surprised")
-    visual_query: str = Field(description="Mots-clés visuels en anglais (1 à 3 mots max, ex: brain, scared man)")
+    visual_query: str = Field(description="Mots-clés visuels en ANGLAIS, ultra-concrets et physiques pour Pexels (ex: person walking through doorway, confused man indoor)")
 
 class ScriptOutput(BaseModel):
     format_choisi: str = Field(description="Choix parmi: short_single, short_twoparts, long_plus_teaser")
-    title: str = Field(description="Titre captivant de la vidéo")
+    title: str = Field(description="Titre captivant, accrocheur et honnête pour la vidéo")
+    hashtags: List[str] = Field(description="Liste de 4 à 6 hashtags pertinents pour les réseaux sociaux (ex: #psychologie #cerveau)")
     script_principal: List[Scene] = Field(description="Scènes de la vidéo principale")
     script_teaser: List[Scene] = Field(default=[], description="Scènes du teaser si le format long_plus_teaser est choisi")
 
@@ -107,7 +108,7 @@ def generate_tts(text: str, output_path: Path):
         raise RuntimeError(f"Génération TTS échouée pour le texte : {text[:30]}...")
 
 # ============================================================
-# GENERATION VIA SDK GEMINI OFFICIEL (GRATUIT & ULTRA STABLE)
+# GENERATION VIA SDK GEMINI OFFICIEL
 # ============================================================
 
 SYSTEM_PROMPT = """Tu es le réalisateur IA de 'Cerveau Curieux'. 
@@ -118,9 +119,13 @@ CHOIX DE FORMATS POSSIBLES (Choisis-en UN SEUL) :
 2. "short_twoparts" : Sujet dense. Script d'environ 250 mots (pour ~1m40s). Le système le coupera ensuite en 2.
 3. "long_plus_teaser" : Sujet complexe. Script principal TRES LONG (>450 mots pour >2m50s) ET un script teaser de ~70 mots.
 
-CONTRAINTES :
-- Chaque scène doit respecter le schéma JSON fourni.
-- Si tu choisis "long_plus_teaser", le script du teaser DOIT obligatoirement se terminer par un appel à la vidéo complète sur la chaîne.
+RÈGLES CRITIQUES POUR LES REQUÊTES VISUELLES (`visual_query`) :
+- Le `visual_query` DOIT être en ANGLAIS, ultra-concret et littéral pour une recherche Pexels (banque de vidéos).
+- INTERDIT d'utiliser des termes abstraits ou psychologiques (ex: "event boundary", "memory purge", "brain processing").
+- Utilise des actions visuelles réelles et des décors physiques (ex: au lieu de "event boundary", écris "person walking through doorway indoor"; au lieu de "memory working", écris "person looking around confused").
+- 2 à 4 mots max par requête.
+
+Génère également un titre accrocheur, honnête (sans mensonge ni exagération trompeuse) et une liste de 4 à 6 hashtags pertinents.
 """
 
 def generate_script_gemini(topic: str, status_cb) -> Dict:
@@ -141,12 +146,9 @@ def generate_script_gemini(topic: str, status_cb) -> Dict:
                 temperature=0.7,
             ),
         )
-        
-        # Extraction robuste (gère Pydantic automatique ou Fallback texte brut)
         if hasattr(response, 'parsed') and response.parsed:
             return response.parsed.model_dump()
         return json.loads(response.text)
-
     except Exception as e:
         raise RuntimeError(f"Erreur lors de la génération avec Gemini Flash : {e}")
 
@@ -157,7 +159,7 @@ def generate_script_gemini(topic: str, status_cb) -> Dict:
 def search_pexels_video(query: str, orientation: str) -> Optional[str]:
     if not PEXELS_API_KEY: return None
     words = [w for w in re.sub(r'[^a-zA-Z\s]', '', query).split() if len(w) > 2]
-    clean_query = " ".join(words[:3])
+    clean_query = " ".join(words[:4])
     
     url = f"https://api.pexels.com/videos/search?query={clean_query}&orientation={orientation}&per_page=5"
     headers = {"Authorization": PEXELS_API_KEY}
@@ -182,12 +184,12 @@ def download_file(url: str, dest: Path) -> bool:
     except Exception: return False
 
 # ============================================================
-# SOUS-TITRES & DECOUPAGE (SPLIT)
+# SOUS-TITRES DYNAMIQUES (CHUNKS TIKTOK STYLE)
 # ============================================================
 
 def create_ass_subtitles(scenes: List[Dict], output_ass: Path, width: int, height: int):
-    font_size = 48 if width == 1080 else 36
-    margin_v = 180 if height == 1920 else 60
+    font_size = 52 if width == 1080 else 38
+    margin_v = 200 if height == 1920 else 70
     
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -196,7 +198,7 @@ PlayResY: {height}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,{font_size},&H00FFFFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,20,20,{margin_v},1
+Style: Default,Arial,{font_size},&H0000FFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,20,20,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -204,12 +206,32 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     lines = []
     current_time = 0.0
     for scene in scenes:
-        duration = scene["duration"]
-        start_t = time.strftime('%H:%M:%S', time.gmtime(current_time)) + f".{int((current_time % 1)*100):02d}"
-        end_t = time.strftime('%H:%M:%S', time.gmtime(current_time + duration)) + f".{int(((current_time + duration) % 1)*100):02d}"
+        scene_duration = scene["duration"]
         text = scene["text"].replace("\n", " ").replace('"', '')
-        lines.append(f"Dialogue: 0,{start_t},{end_t},Default,,0,0,0,,{text}")
-        current_time += duration
+        
+        # Découpage intelligent par petits morceaux (4 à 6 mots) pour un affichage dynamique type TikTok
+        words = text.split()
+        if not words:
+            current_time += scene_duration
+            continue
+            
+        chunks = []
+        chunk_size = 5
+        for i in range(0, len(words), chunk_size):
+            chunks.append(" ".join(words[i:i+chunk_size]))
+            
+        chunk_duration = scene_duration / len(chunks)
+        
+        for idx, chunk in enumerate(chunks):
+            start_t = current_time + (idx * chunk_duration)
+            end_t = start_t + chunk_duration
+            
+            start_str = time.strftime('%H:%M:%S', time.gmtime(start_t)) + f".{int((start_t % 1)*100):02d}"
+            end_str = time.strftime('%H:%M:%S', time.gmtime(end_t)) + f".{int((end_t % 1)*100):02d}"
+            
+            lines.append(f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{chunk}")
+            
+        current_time += scene_duration
 
     with open(output_ass, "w", encoding="utf-8") as f:
         f.write(header + "\n".join(lines))
@@ -269,7 +291,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         mascot_img = MASCOT_FILES.get(emotion, MASCOT_FILES["default"])
         if not mascot_img.exists(): mascot_img = MASCOT_FILES.get("default")
 
-        url = search_pexels_video(scene.get("visual_query", "science"), orientation)
+        url = search_pexels_video(scene.get("visual_query", "person walking"), orientation)
         visual_file = work_dir / f"src_vis_{idx:03d}.mp4"
         output_clip = work_dir / f"clip_{idx:03d}.mp4"
         
@@ -296,7 +318,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
     run_command([FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", "concat_video.txt", "-c", "copy", "raw_video.mp4"], cwd=work_dir)
 
     # 3. SOUS-TITRES & MIXAGE FINAL
-    status_cb("⚙️ Incrustation des sous-titres et mixage final...")
+    status_cb("⚙️ Incrustation des sous-titres dynamiques et mixage final...")
     create_ass_subtitles(script_scenes, work_dir / "subtitles.ass", width, height)
 
     final_output = OUTPUT_DIR / f"export_{int(time.time())}_{video_format}.mp4"
@@ -342,6 +364,11 @@ def main():
             format_choisi = ai_data.get("format_choisi", "short_single")
             
             st.success(f"🎬 Format automatiquement sélectionné : **{format_choisi.replace('_', ' ').title()}**")
+
+            # Affichage du titre et des hashtags générés
+            st.markdown("### 📌 Métadonnées pour Publication")
+            st.info(f"**Titre suggéré :** {ai_data.get('title', '')}")
+            st.text("Hashtags : " + " ".join(ai_data.get('hashtags', [])))
 
             # 2. Routage vers le bon pipeline selon le format
             if format_choisi == "short_single":
