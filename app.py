@@ -33,6 +33,10 @@ FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
 
 TTS_VOICE = "fr-FR-HenriNeural"
 
+# Fichiers audio SFX mis à jour avec tes noms exacts
+SFX_FILE = BASE_DIR / "sfx_whoosh.mp3" 
+CLICK_SFX_FILE = BASE_DIR / "sfx_ding.mp3" # Tu peux changer par "sfx_pop.mp3" si tu préfères
+
 MASCOT_FILES = {
     "default": BASE_DIR / "mascot_default.png",
     "thinking": BASE_DIR / "mascot_thinking.png",
@@ -40,6 +44,10 @@ MASCOT_FILES = {
     "laughing": BASE_DIR / "mascot_laughing.png",
     "explaining": BASE_DIR / "mascot_explaining.png",
     "surprised": BASE_DIR / "mascot_surprised.png",
+    "angry": BASE_DIR / "mascot_angry.png",
+    "happy": BASE_DIR / "mascot_happy.png",
+    "shocked": BASE_DIR / "mascot_shocked.png",
+    "sad": BASE_DIR / "mascot_sad.png",
 }
 
 # ============================================================
@@ -47,15 +55,15 @@ MASCOT_FILES = {
 # ============================================================
 
 class Scene(BaseModel):
-    text: str = Field(description="Texte de la narration pour la scène. Ton moderne, amusant, direct.")
-    emotion: str = Field(description="Émotion parmi: default, thinking, confused, laughing, explaining, surprised")
-    visual_query: str = Field(description="Mots-clés visuels en ANGLAIS. DOIT REFLÉTER L'ACTION (ex: si on parle de travail, mettre 'typing on laptop'. Si on parle de fatigue, mettre 'tired person').")
+    text: str = Field(description="Texte de la narration. Ton moderne, amusant, direct.")
+    emotion: str = Field(description="Émotion parmi: default, thinking, confused, laughing, explaining, surprised, angry, happy, shocked, sad")
+    visual_query: str = Field(description="Mots-clés visuels en ANGLAIS. DOIT REFLÉTER UNE ACTION PHYSIQUE LITTÉRALE (ex: 'typing on laptop', 'opening door', 'finger pressing screen'). AUCUN concept abstrait.")
 
 class ScriptOutput(BaseModel):
     format_choisi: str = Field(description="Choix parmi: short_single, short_twoparts, long_plus_teaser")
     title: str = Field(description="Titre captivant, accrocheur et honnête pour la vidéo")
-    hashtags: List[str] = Field(description="Liste de 4 à 6 hashtags pertinents pour les réseaux sociaux")
-    script_principal: List[Scene] = Field(description="Scènes de la vidéo. La dernière scène DOIT inclure un appel à l'action naturel (like + abonnement).")
+    hashtags: List[str] = Field(description="Liste de 4 à 6 hashtags pertinents")
+    script_principal: List[Scene] = Field(description="Scènes de la vidéo. La dernière scène DOIT inclure un appel à l'action simple (ex: 'Abonne-toi et like !').")
     script_teaser: List[Scene] = Field(default=[], description="Scènes du teaser si le format long_plus_teaser est choisi")
 
 # ============================================================
@@ -95,7 +103,7 @@ def qc_validate_video(video_path: Path):
     ]
     res_audio = run_command(cmd_audio)
     if "audio" not in res_audio.stdout.lower():
-        raise RuntimeError("QC Échec: Le fichier MP4 final est muet (aucune piste audio trouvée).")
+        raise RuntimeError("QC Échec: Le MP4 final est muet.")
 
 # ============================================================
 # EDGE-TTS
@@ -111,29 +119,22 @@ def generate_tts(text: str, output_path: Path):
 # GENERATION VIA SDK GEMINI OFFICIEL
 # ============================================================
 
-SYSTEM_PROMPT = """Tu es le réalisateur IA de 'Cerveau Curieux'. Ton but est de créer des scripts de vidéos courtes (Shorts/TikTok) ultra-dynamiques et engageantes.
+SYSTEM_PROMPT = """Tu es le réalisateur IA de 'Cerveau Curieux'. Ton but est de créer des scripts de vidéos courtes ultra-dynamiques.
 
 RÈGLES DE NARRATION :
-- Utilise un ton moderne, amusant et captivant. 
-- Au lieu de dire "Pour tromper ton cerveau, effectue une tâche", dis plutôt "Voici comment hacker ton cerveau pour éviter ça".
-- Termine TOUJOURS la dernière scène par un rappel naturel à l'abonnement et au like (ex: "Abonne-toi et lâche un like pour plus d'astuces !", sans donner de chiffres précis ni parler d'algorithme).
+- Utilise un ton moderne, amusant et percutant. 
+- Au lieu de dire "Pour tromper ton cerveau", dis "Voici comment hacker ton cerveau".
+- Termine TOUJOURS la dernière scène par un appel à l'action naturel.
 
 RÈGLES CRITIQUES POUR LES REQUÊTES VISUELLES (`visual_query`) :
-- Le `visual_query` DOIT être en ANGLAIS et décrire LITTÉRALEMENT ce qu'on doit voir à l'écran pour illustrer la situation.
-- Si l'histoire parle de quelqu'un qui doit faire un projet mais qui range sa chambre, le visuel de la scène doit être "messy room" ou "person cleaning room".
-- S'il s'agit du cerveau qui panique, cherche "stressed person" ou "person thinking hard".
-- 2 à 4 mots max par requête, uniquement des actions physiques et concrètes. AUCUN terme abstrait.
-
-CHOIX DE FORMATS (Choisis-en UN SEUL) :
-1. "short_single" : Sujet simple. Script de 120 à 150 mots (pour 45s à 60s).
-2. "short_twoparts" : Sujet dense. Script d'environ 250 mots (pour ~1m40s).
-3. "long_plus_teaser" : Sujet complexe. Script principal >450 mots ET un script teaser.
+- Décris LITTÉRALEMENT ce qu'on voit à l'écran. UNIQUEMENT des actions physiques et concrètes.
+- INTERDICTION STRICTE d'utiliser des concepts abstraits, psychologiques ou émotionnels.
+- 2 à 4 mots max en ANGLAIS.
+- RÈGLE ABSOLUE POUR LA TOUTE DERNIÈRE SCÈNE (CTA) : La `visual_query` DOIT ÊTRE "finger pressing screen" ou "finger tapping smartphone".
 """
 
 def generate_script_gemini(topic: str, status_cb) -> Dict:
-    if not GEMINI_API_KEY:
-        raise RuntimeError("Clé API GEMINI_API_KEY manquante.")
-
+    if not GEMINI_API_KEY: raise RuntimeError("Clé API GEMINI manquante.")
     client = genai.Client(api_key=GEMINI_API_KEY)
     status_cb("🧠 Analyse du sujet et rédaction du script...")
 
@@ -152,7 +153,7 @@ def generate_script_gemini(topic: str, status_cb) -> Dict:
             return response.parsed.model_dump()
         return json.loads(response.text)
     except Exception as e:
-        raise RuntimeError(f"Erreur lors de la génération avec Gemini Flash : {e}")
+        raise RuntimeError(f"Erreur Gemini Flash : {e}")
 
 # ============================================================
 # PEXELS & FALLBACK
@@ -235,9 +236,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 def fmt_time(t):
                     return time.strftime('%H:%M:%S', time.gmtime(t)) + f".{int((t % 1)*100):02d}"
                 
-                start_str = fmt_time(start_t)
-                end_str = fmt_time(end_t)
-                
                 formatted_words = []
                 for k, w in enumerate(chunk_words):
                     if k == idx_word:
@@ -246,7 +244,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         formatted_words.append(w)
                 
                 dialogue_text = " ".join(formatted_words)
-                lines.append(f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{dialogue_text}")
+                lines.append(f"Dialogue: 0,{fmt_time(start_t)},{fmt_time(end_t)},Default,,0,0,0,,{dialogue_text}")
                 
         current_time += scene_duration
 
@@ -273,16 +271,39 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
     width, height = (1080, 1920) if video_format == "portrait" else (1920, 1080)
     orientation = "portrait" if video_format == "portrait" else "landscape"
 
-    status_cb("🎙️ Génération de la voix off...")
+    status_cb("🎙️ Génération de la voix off et mixage SFX...")
     audio_clips = []
     total_duration = 0.0
+    
+    total_scenes = len(script_scenes)
+
     for idx, scene in enumerate(script_scenes):
-        audio_file = work_dir / f"audio_{idx:03d}.mp3"
-        generate_tts(scene["text"], audio_file)
-        dur = get_media_duration(audio_file)
+        temp_audio = work_dir / f"temp_audio_{idx:03d}.mp3"
+        final_audio = work_dir / f"audio_{idx:03d}.mp3"
+        generate_tts(scene["text"], temp_audio)
+        
+        is_last_scene = (idx == total_scenes - 1)
+        sfx_to_use = None
+        
+        if is_last_scene and CLICK_SFX_FILE.exists():
+            sfx_to_use = CLICK_SFX_FILE
+        elif idx > 0 and SFX_FILE.exists():
+            sfx_to_use = SFX_FILE
+
+        if sfx_to_use:
+            cmd_mix = [
+                FFMPEG_BIN, "-y", "-i", str(temp_audio), "-i", str(sfx_to_use),
+                "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=0[a]",
+                "-map", "[a]", str(final_audio)
+            ]
+            run_command(cmd_mix, cwd=work_dir)
+        else:
+            shutil.copy(temp_audio, final_audio)
+
+        dur = get_media_duration(final_audio)
         scene["duration"] = dur
         total_duration += dur
-        audio_clips.append(audio_file)
+        audio_clips.append(final_audio)
 
     with open(work_dir / "concat_audio.txt", "w") as f:
         for a in audio_clips: f.write(f"file '{a.name}'\n")
