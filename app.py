@@ -128,11 +128,11 @@ def generate_script_gemini(topic: str, status_cb) -> Dict:
         raise RuntimeError("Clé API GEMINI_API_KEY manquante. Veuillez la configurer.")
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-    status_cb("🧠 Analyse du sujet et rédaction du script via Gemini 2.5 Flash...")
+    status_cb("🧠 Analyse du sujet et rédaction du script via Gemini 3.6 Flash...")
 
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=f"Sujet : {topic}",
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
