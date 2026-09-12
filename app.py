@@ -35,7 +35,7 @@ TTS_VOICE = "fr-FR-HenriNeural"
 
 # Fichiers audio SFX mis à jour avec tes noms exacts
 SFX_FILE = BASE_DIR / "sfx_whoosh.mp3" 
-CLICK_SFX_FILE = BASE_DIR / "sfx_ding.mp3" # Tu peux changer par "sfx_pop.mp3" si tu préfères
+CLICK_SFX_FILE = BASE_DIR / "sfx_ding.mp3"
 
 MASCOT_FILES = {
     "default": BASE_DIR / "mascot_default.png",
@@ -57,13 +57,13 @@ MASCOT_FILES = {
 class Scene(BaseModel):
     text: str = Field(description="Texte de la narration. Ton moderne, amusant, direct.")
     emotion: str = Field(description="Émotion parmi: default, thinking, confused, laughing, explaining, surprised, angry, happy, shocked, sad")
-    visual_query: str = Field(description="Mots-clés visuels en ANGLAIS. DOIT REFLÉTER UNE ACTION PHYSIQUE LITTÉRALE (ex: 'typing on laptop', 'opening door', 'finger pressing screen'). AUCUN concept abstrait.")
+    visual_query: str = Field(description="Mots-clés visuels en ANGLAIS. DOIT REFLÉTER UNE ACTION PHYSIQUE LITTÉRALE. AUCUN concept abstrait.")
 
 class ScriptOutput(BaseModel):
     format_choisi: str = Field(description="Choix parmi: short_single, short_twoparts, long_plus_teaser")
     title: str = Field(description="Titre captivant, accrocheur et honnête pour la vidéo")
     hashtags: List[str] = Field(description="Liste de 4 à 6 hashtags pertinents")
-    script_principal: List[Scene] = Field(description="Scènes de la vidéo. La dernière scène DOIT inclure un appel à l'action simple (ex: 'Abonne-toi et like !').")
+    script_principal: List[Scene] = Field(description="Scènes de la vidéo (au moins 8 à 10 scènes). La dernière scène DOIT être l'appel à l'action.")
     script_teaser: List[Scene] = Field(default=[], description="Scènes du teaser si le format long_plus_teaser est choisi")
 
 # ============================================================
@@ -119,24 +119,23 @@ def generate_tts(text: str, output_path: Path):
 # GENERATION VIA SDK GEMINI OFFICIEL
 # ============================================================
 
-SYSTEM_PROMPT = """Tu es le réalisateur IA de 'Cerveau Curieux'. Ton but est de créer des scripts de vidéos courtes ultra-dynamiques.
+SYSTEM_PROMPT = """Tu es le réalisateur IA de 'Cerveau Curieux'. Ton but est de créer des scripts de vidéos courtes très détaillés et dynamiques (min 45 secondes).
 
-RÈGLES DE NARRATION :
-- Utilise un ton moderne, amusant et percutant. 
-- Au lieu de dire "Pour tromper ton cerveau", dis "Voici comment hacker ton cerveau".
-- Termine TOUJOURS la dernière scène par un appel à l'action naturel.
+RÈGLES DE NARRATION ET DE RYTHME (CRITIQUE) :
+- Explique le sujet en profondeur, ne te contente pas de le survoler. Donne des exemples.
+- DÉCOUPE LE SCRIPT : 1 seule phrase par scène. C'est obligatoire pour garantir un changement visuel très régulier. Une vidéo doit contenir au minimum 8 à 10 scènes.
+- Termine TOUJOURS la dernière scène par un appel à l'action naturel ("Abonne-toi", "Like").
 
 RÈGLES CRITIQUES POUR LES REQUÊTES VISUELLES (`visual_query`) :
 - Décris LITTÉRALEMENT ce qu'on voit à l'écran. UNIQUEMENT des actions physiques et concrètes.
-- INTERDICTION STRICTE d'utiliser des concepts abstraits, psychologiques ou émotionnels.
 - 2 à 4 mots max en ANGLAIS.
-- RÈGLE ABSOLUE POUR LA TOUTE DERNIÈRE SCÈNE (CTA) : La `visual_query` DOIT ÊTRE "finger pressing screen" ou "finger tapping smartphone".
+- RÈGLE ABSOLUE POUR LA DERNIÈRE SCÈNE (CTA) : La `visual_query` DOIT ÊTRE "thumbs up" ou "like button" ou "person smiling pointing".
 """
 
 def generate_script_gemini(topic: str, status_cb) -> Dict:
     if not GEMINI_API_KEY: raise RuntimeError("Clé API GEMINI manquante.")
     client = genai.Client(api_key=GEMINI_API_KEY)
-    status_cb("🧠 Analyse du sujet et rédaction du script...")
+    status_cb("🧠 Analyse du sujet et rédaction détaillée du script...")
 
     try:
         response = client.models.generate_content(
@@ -280,7 +279,10 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
     for idx, scene in enumerate(script_scenes):
         temp_audio = work_dir / f"temp_audio_{idx:03d}.mp3"
         final_audio = work_dir / f"audio_{idx:03d}.mp3"
-        generate_tts(scene["text"], temp_audio)
+        
+        # Correction de la prononciation avant génération (n'affecte pas les sous-titres)
+        text_for_tts = scene["text"].replace("hacker", "haquer").replace("Hacker", "Haquer")
+        generate_tts(text_for_tts, temp_audio)
         
         is_last_scene = (idx == total_scenes - 1)
         sfx_to_use = None
@@ -291,9 +293,10 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
             sfx_to_use = SFX_FILE
 
         if sfx_to_use:
+            # Filtre amix simplifié pour compatibilité Streamlit Cloud
             cmd_mix = [
                 FFMPEG_BIN, "-y", "-i", str(temp_audio), "-i", str(sfx_to_use),
-                "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=0[a]",
+                "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first[a]",
                 "-map", "[a]", str(final_audio)
             ]
             run_command(cmd_mix, cwd=work_dir)
@@ -371,6 +374,10 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
 def main():
     st.set_page_config(page_title=APP_TITLE, page_icon="🧠", layout="centered")
     st.title("🧠 Cerveau Curieux — Studio IA Autonome")
+    
+    # Alerte si les fichiers audio sont manquants sur le serveur Streamlit
+    if not SFX_FILE.exists() or not CLICK_SFX_FILE.exists():
+        st.warning("⚠️ Les fichiers sonores (sfx_whoosh.mp3 ou sfx_ding.mp3) sont introuvables. Vérifie qu'ils sont bien sur ton GitHub avec ces noms exacts (les majuscules comptent sous Linux).")
 
     cleanup_old_temp_dirs()
     topic = st.text_area("Sujet de la vidéo :", placeholder="Ex: L'effet Mandela, pourquoi notre cerveau invente des souvenirs ?")
