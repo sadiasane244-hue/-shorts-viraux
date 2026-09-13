@@ -33,11 +33,9 @@ FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
 
 TTS_VOICE = "fr-FR-HenriNeural"
 
-# Fichiers audio SFX mis à jour avec tes noms exacts
-# Recherche dynamique pour contourner les caractères invisibles (comme \u200b)
+# Recherche dynamique pour contourner les caractères invisibles
 SFX_FILE = next((f for f in BASE_DIR.iterdir() if f.is_file() and "sfx_whoosh" in f.name), BASE_DIR / "sfx_whoosh.mp3")
 CLICK_SFX_FILE = next((f for f in BASE_DIR.iterdir() if f.is_file() and "sfx_ding" in f.name), BASE_DIR / "sfx_ding.mp3")
-
 
 MASCOT_FILES = {
     "default": BASE_DIR / "mascot_default.png",
@@ -57,7 +55,7 @@ MASCOT_FILES = {
 # ============================================================
 
 class Scene(BaseModel):
-    text: str = Field(description="Texte de la narration. Ton moderne, amusant, direct.")
+    text: str = Field(description="Texte de la narration. Ton très street, urbain, mais sans aucune insulte.")
     emotion: str = Field(description="Émotion parmi: default, thinking, confused, laughing, explaining, surprised, angry, happy, shocked, sad")
     visual_query: str = Field(description="Mots-clés visuels en ANGLAIS. DOIT REFLÉTER UNE ACTION PHYSIQUE LITTÉRALE. AUCUN concept abstrait.")
 
@@ -121,12 +119,18 @@ def generate_tts(text: str, output_path: Path):
 # GENERATION VIA SDK GEMINI OFFICIEL
 # ============================================================
 
-SYSTEM_PROMPT = """Tu es le réalisateur IA de 'Cerveau Curieux'. Ton but est de créer des scripts de vidéos courtes très détaillés et dynamiques (min 45 secondes).
+SYSTEM_PROMPT = """Tu es le réalisateur IA de 'Cerveau Curieux'. Ton but est de créer des scripts de vidéos courtes ultra-dynamiques (min 45 secondes).
 
-RÈGLES DE NARRATION ET DE RYTHME (CRITIQUE) :
-- Explique le sujet en profondeur, ne te contente pas de le survoler. Donne des exemples.
-- DÉCOUPE LE SCRIPT : 1 seule phrase par scène. C'est obligatoire pour garantir un changement visuel très régulier. Une vidéo doit contenir au minimum 8 à 10 scènes.
-- Termine TOUJOURS la dernière scène par un appel à l'action naturel ("Abonne-toi", "Like").
+RÈGLES DE NARRATION (STYLE STREET/URBAIN) :
+- Utilise un vocabulaire très jeune, "street" et urbain (exemples de mots à placer naturellement : "une dinguerie", "frérot", "wesh l'équipe", "carrément", "ça rend ouf", "le cerveau il pète un câble", "bref").
+- Le ton doit être ultra-familier, direct et très énergique. Tutoiement obligatoire.
+- INTERDICTION STRICTE d'utiliser des insultes, des gros mots ou d'être vulgaire. Reste respectueux mais très de la rue.
+- Explique le sujet en profondeur, donne des exemples concrets du quotidien.
+
+RÈGLES DE DÉCOUPAGE (CRITIQUE) :
+- DÉCOUPE LE SCRIPT : 1 seule phrase par scène. C'est obligatoire pour garantir un changement visuel très régulier. 
+- Une vidéo doit contenir au minimum 8 à 10 scènes.
+- Termine TOUJOURS la dernière scène par un appel à l'action naturel ("Lâche un like", "Abonne-toi frérot").
 
 RÈGLES CRITIQUES POUR LES REQUÊTES VISUELLES (`visual_query`) :
 - Décris LITTÉRALEMENT ce qu'on voit à l'écran. UNIQUEMENT des actions physiques et concrètes.
@@ -147,7 +151,7 @@ def generate_script_gemini(topic: str, status_cb) -> Dict:
                 system_instruction=SYSTEM_PROMPT,
                 response_mime_type="application/json",
                 response_schema=ScriptOutput,
-                temperature=0.7,
+                temperature=0.8,
             ),
         )
         if hasattr(response, 'parsed') and response.parsed:
@@ -282,7 +286,6 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         temp_audio = work_dir / f"temp_audio_{idx:03d}.mp3"
         final_audio = work_dir / f"audio_{idx:03d}.mp3"
         
-        # Correction de la prononciation avant génération (n'affecte pas les sous-titres)
         text_for_tts = scene["text"].replace("hacker", "haquer").replace("Hacker", "Haquer")
         generate_tts(text_for_tts, temp_audio)
         
@@ -295,10 +298,10 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
             sfx_to_use = SFX_FILE
 
         if sfx_to_use:
-            # Filtre amix simplifié pour compatibilité Streamlit Cloud
+            # Correction du Ducking : Le SFX est baissé à 15% et on double le mix final pour retrouver le niveau de voix normal
             cmd_mix = [
                 FFMPEG_BIN, "-y", "-i", str(temp_audio), "-i", str(sfx_to_use),
-                "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first[a]",
+                "-filter_complex", "[1:a]volume=0.15[sfx];[0:a][sfx]amix=inputs=2:duration=first[mix];[mix]volume=2.0[a]",
                 "-map", "[a]", str(final_audio)
             ]
             run_command(cmd_mix, cwd=work_dir)
@@ -314,7 +317,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         for a in audio_clips: f.write(f"file '{a.name}'\n")
     run_command([FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", "concat_audio.txt", "-c", "copy", "full_audio.mp3"], cwd=work_dir)
 
-    status_cb("🎥 Assemblage des visuels et mascotte...")
+    status_cb("🎥 Assemblage des visuels avec effets de transition...")
     video_clips = []
     fps = 25
     mascot_scale = int(width * 0.22) if video_format == "portrait" else int(width * 0.15)
@@ -333,15 +336,18 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         
         display_duration = min(4.0, duration) 
         enable_expr = f"between(t,0,{display_duration})"
+        
+        # Ajout du Flash Cut : Surbrillance rapide (0.15s) au début de chaque clip sauf le premier
+        flash_effect = ",colorchannelmixer=rr=1.8:gg=1.8:bb=1.8:enable='between(t,0,0.15)'" if idx > 0 else ""
 
         if url and download_file(url, visual_file):
-            base_filter = f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}[bg]"
+            base_filter = f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}{flash_effect}[bg]"
             cmd = [FFMPEG_BIN, "-y", "-stream_loop", "-1", "-i", visual_file.name, "-i", str(mascot_img.resolve())]
         else:
             fallback = work_dir / f"fallback_{idx:03d}.png"
             Image.new("RGB", (width, height), color=(30, 30, 45)).save(fallback)
             frames = int(duration * fps)
-            base_filter = f"[0:v]zoompan=z='min(zoom+0.0015,1.3)':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',scale={width}:{height}[bg]"
+            base_filter = f"[0:v]zoompan=z='min(zoom+0.0015,1.3)':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',scale={width}:{height}{flash_effect}[bg]"
             cmd = [FFMPEG_BIN, "-y", "-loop", "1", "-i", fallback.name, "-i", str(mascot_img.resolve())]
 
         filter_complex = f"{base_filter};[1:v]scale={mascot_scale}:-1[mascot];[bg][mascot]overlay=x={pos_x}:y={pos_y}:enable='{enable_expr}'[v_out]"
@@ -376,14 +382,6 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
 def main():
     st.set_page_config(page_title=APP_TITLE, page_icon="🧠", layout="centered")
     st.title("🧠 Cerveau Curieux — Studio IA Autonome")
-    
-    # --- LES 3 LIGNES SONT AJOUTÉES ICI ---
-    st.info(f"📁 Dossier analysé : {BASE_DIR}")
-    fichiers_sfx = [f.name for f in BASE_DIR.iterdir() if f.is_file() and "sfx" in f.name]
-    st.info(f"🎵 Fichiers audio vus par le serveur : {fichiers_sfx}")
-    # --------------------------------------
-
-    # Alerte si les fichiers audio sont manquants sur le serveur Streamlit
 
     cleanup_old_temp_dirs()
     topic = st.text_area("Sujet de la vidéo :", placeholder="Ex: L'effet Mandela, pourquoi notre cerveau invente des souvenirs ?")
