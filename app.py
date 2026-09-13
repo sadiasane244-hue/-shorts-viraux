@@ -34,8 +34,10 @@ FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
 TTS_VOICE = "fr-FR-HenriNeural"
 
 # Fichiers audio SFX mis à jour avec tes noms exacts
-SFX_FILE = BASE_DIR / "sfx_whoosh.mp3" 
-CLICK_SFX_FILE = BASE_DIR / "sfx_ding.mp3"
+# Recherche dynamique pour contourner les caractères invisibles (comme \u200b)
+SFX_FILE = next((f for f in BASE_DIR.iterdir() if f.is_file() and "sfx_whoosh" in f.name), BASE_DIR / "sfx_whoosh.mp3")
+CLICK_SFX_FILE = next((f for f in BASE_DIR.iterdir() if f.is_file() and "sfx_ding" in f.name), BASE_DIR / "sfx_ding.mp3")
+
 
 MASCOT_FILES = {
     "default": BASE_DIR / "mascot_default.png",
