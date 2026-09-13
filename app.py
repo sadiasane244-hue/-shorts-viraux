@@ -7,7 +7,7 @@ import subprocess
 import requests
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 import streamlit as st
 from pydantic import BaseModel, Field
 from google import genai
@@ -105,55 +105,6 @@ def qc_validate_video(video_path: Path):
         raise RuntimeError("QC Échec : La vidéo générée ne contient pas de piste audio.")
 
 # ============================================================
-# GENERATION DE MINIATURE (COVER) AUTOMATIQUE
-# ============================================================
-
-def generate_thumbnail(title: str, emotion: str, width: int, height: int, output_path: Path):
-    """Génère une miniature accrocheuse avec l'identité de la chaîne."""
-    img = Image.new("RGB", (width, height), color=(15, 15, 26))
-    draw = ImageDraw.Draw(img)
-
-    for y in range(0, height, 10):
-        alpha = int(255 * (y / height))
-        draw.line([(0, y), (width, y)], fill=(10 + alpha//10, 15 + alpha//8, 35 + alpha//5))
-
-    mascot_path = MASCOT_FILES.get(emotion, MASCOT_FILES["default"])
-    if not mascot_path.exists(): mascot_path = MASCOT_FILES["default"]
-    
-    if mascot_path.exists():
-        mascot = Image.open(mascot_path).convert("RGBA")
-        m_width = int(width * 0.55)
-        m_height = int(mascot.height * (m_width / mascot.width))
-        mascot = mascot.resize((m_width, m_height), Image.Resampling.LANCZOS)
-        m_pos_x = (width - m_width) // 2
-        m_pos_y = height - m_height - int(height * 0.08)
-        img.paste(mascot, (m_pos_x, m_pos_y), mascot)
-
-    words = title.upper().split()
-    lines = []
-    curr_line = []
-    for w in words:
-        curr_line.append(w)
-        if len(" ".join(curr_line)) > 14:
-            lines.append(" ".join(curr_line[:-1]))
-            curr_line = [w]
-    if curr_line:
-        lines.append(" ".join(curr_line))
-
-    text_y = int(height * 0.12)
-    line_height = int(height * 0.07)
-    
-    for line in lines[:3]:
-        draw.text(((width // 2) + 4, text_y + 4), line, fill=(0, 0, 0), anchor="mm", font_size=int(width * 0.075))
-        draw.text((width // 2, text_y), line, fill=(255, 230, 0), anchor="mm", font_size=int(width * 0.075))
-        text_y += line_height
-
-    draw.rectangle([(int(width*0.1), height - 120), (int(width*0.9), height - 40)], fill=(220, 20, 60))
-    draw.text((width // 2, height - 80), "🧠 CERVEAU CURIEUX", fill=(255, 255, 255), anchor="mm", font_size=int(width * 0.045))
-
-    img.save(output_path)
-
-# ============================================================
 # TTS & GEMINI
 # ============================================================
 
@@ -182,7 +133,7 @@ RÈGLES VISUELLES (`visual_query`) :
 def generate_script_gemini(topic: str, status_cb) -> Dict:
     if not GEMINI_API_KEY: raise RuntimeError("Clé API GEMINI manquante.")
     client = genai.Client(api_key=GEMINI_API_KEY)
-    status_cb("🧠 Analyse du sujet et rédaction du script...")
+    status_cb("🧠 Analyse du sujet et rédaction du script en cours...")
 
     try:
         response = client.models.generate_content(
@@ -380,7 +331,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         for v in video_clips: f.write(f"file '{v.name}'\n")
     run_command([FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", "concat_video.txt", "-c", "copy", "raw_video.mp4"], cwd=work_dir)
 
-    status_cb("⚙️ Incrustation des sous-titres, du Watermark et normalisation...")
+    status_cb("⚙️ Incrustation des sous-titres, du Watermark et finalisation audio...")
     create_ass_subtitles(script_scenes, work_dir / "subtitles.ass", width, height)
 
     watermark_x = 40
@@ -408,90 +359,153 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
     return final_output
 
 # ============================================================
-# INTERFACE STREAMLIT
+# INTERFACE STREAMLIT (EMBELLIE)
 # ============================================================
 
 def main():
-    st.set_page_config(page_title=APP_TITLE, page_icon="🧠", layout="centered")
-    st.title("🧠 Cerveau Curieux — Studio IA Autonome")
+    # 1. Configuration de la page
+    st.set_page_config(page_title=APP_TITLE, page_icon="🧠", layout="centered", initial_sidebar_state="expanded")
+    
+    # 2. Injection de CSS personnalisé (Design Ultrasoft & Moderne)
+    st.markdown("""
+        <style>
+        /* Arrière-plan global */
+        .stApp { background-color: #0E1117; }
+        
+        /* Personnalisation du bouton principal */
+        div.stButton > button:first-child {
+            background: linear-gradient(90deg, #FF4B4B 0%, #FF8F8F 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 0.6rem 1rem;
+            font-size: 1.2rem;
+            font-weight: 700;
+            width: 100%;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(255, 75, 75, 0.2);
+        }
+        div.stButton > button:first-child:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(255, 75, 75, 0.4);
+            color: white;
+            border: none;
+        }
+        
+        /* Titre et Sous-titre personnalisés */
+        .main-title { text-align: center; font-size: 3rem; font-weight: 800; margin-bottom: 0px; color: #FFFFFF; }
+        .sub-title { text-align: center; font-size: 1.2rem; color: #A0AEC0; margin-top: 0px; margin-bottom: 30px; }
+        
+        /* Zone de texte plus lisse */
+        .stTextArea textarea {
+            background-color: #1A1C24;
+            border: 1px solid #2D3748;
+            border-radius: 10px;
+            color: #E2E8F0;
+            font-size: 1.1rem;
+        }
+        .stTextArea textarea:focus { border-color: #FF4B4B; box-shadow: 0 0 0 1px #FF4B4B; }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # 3. Sidebar (Barre latérale)
+    with st.sidebar:
+        st.markdown("<h3 style='text-align: center;'>Tableau de bord</h3>", unsafe_allow_html=True)
+        if MASCOT_FILES["default"].exists():
+            st.image(str(MASCOT_FILES["default"]), use_container_width=True)
+        
+        st.markdown("---")
+        st.markdown("🎯 **Mode Autonome Actif**")
+        st.write("L'IA détecte le format idéal selon la longueur et la complexité de ton sujet.")
+        
+        st.markdown("---")
+        st.markdown("💡 **Astuce pro**")
+        st.write("Concentre-toi sur l'accroche (les 3 premières secondes). C'est ce qui fait la différence entre 200 et 10 000 vues.")
+
+    # 4. En-tête Principal
+    st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Studio IA Autonome 🎬</div>', unsafe_allow_html=True)
 
     cleanup_old_temp_dirs()
     
-    topic = st.text_area("Sujet de la vidéo :", placeholder="Ex: Pourquoi notre cerveau invente des souvenirs ?")
+    # 5. Formulaire d'entrée
+    st.markdown("### 📝 Quel est ton sujet aujourd'hui ?")
+    topic = st.text_area("Sujet", placeholder="Ex: L'effet Mandela, pourquoi notre cerveau invente des souvenirs ?", label_visibility="collapsed", height=120)
     
-    if st.button("🚀 Lancer la production automatique", type="primary"):
+    # 6. Exécution au clic
+    if st.button("🚀 LANCER LA MAGIE"):
         if not topic.strip():
-            st.error("Veuillez saisir un sujet.")
+            st.warning("⚠️ Oups ! Tu as oublié d'écrire un sujet.")
             return
 
-        status = st.empty()
-        progress = st.progress(0)
-
-        try:
-            progress.progress(10)
-            ai_data = generate_script_gemini(topic, status.info)
-            format_choisi = ai_data.get("format_choisi", "short_single")
-            title = ai_data.get("title", "Cerveau Curieux")
-            
-            st.success(f"🎬 Format sélectionné : **{format_choisi.replace('_', ' ').title()}**")
-            st.info(f"**Titre de la vidéo :** {title}")
-            st.text("Hashtags recommandés : " + " ".join(ai_data.get('hashtags', [])))
-
-            # Génération de la miniature
-            first_scene_emotion = ai_data.get("script_principal", [{}])[0].get("emotion", "default")
-            thumb_w, thumb_h = (1080, 1920) if "short" in format_choisi else (1920, 1080)
-            thumb_path = OUTPUT_DIR / f"thumb_{int(time.time())}.png"
-            generate_thumbnail(title, first_scene_emotion, thumb_w, thumb_h, thumb_path)
-
-            if format_choisi == "short_single":
-                progress.progress(40)
-                video_path = generate_video_pipeline(ai_data.get("script_principal", []), "portrait", status.info)
+        # Utilisation de st.status pour un affichage de chargement super propre
+        with st.status("🎬 Allumage des caméras virtuelles...", expanded=True) as status_box:
+            try:
+                # Petite fonction pour mettre à jour la console de chargement
+                def update_status(msg):
+                    st.write(msg)
                 
-                st.subheader("📱 Vidéo Finale (9:16)")
+                ai_data = generate_script_gemini(topic, update_status)
+                format_choisi = ai_data.get("format_choisi", "short_single")
+                title = ai_data.get("title", "Cerveau Curieux")
+                
+                st.write(f"✅ Format défini : **{format_choisi.replace('_', ' ').title()}**")
+                
+                if format_choisi == "short_single":
+                    video_path = generate_video_pipeline(ai_data.get("script_principal", []), "portrait", update_status)
+                    
+                elif format_choisi == "short_twoparts":
+                    full_video_path = generate_video_pipeline(ai_data.get("script_principal", []), "portrait", update_status)
+                    update_status("✂️ Découpage de la vidéo en 2 parties...")
+                    total_duration = get_media_duration(full_video_path)
+                    part1, part2 = split_video_in_two(full_video_path, total_duration, OUTPUT_DIR)
+                    video_path = [part1, part2] # On passe une liste pour différencier plus bas
+                    
+                elif format_choisi == "long_plus_teaser":
+                    long_path = generate_video_pipeline(ai_data.get("script_principal", []), "landscape", update_status)
+                    short_path = generate_video_pipeline(ai_data.get("script_teaser", []), "portrait", update_status)
+                    video_path = [long_path, short_path] # Liste
+                
+                status_box.update(label="🎉 Production terminée avec succès !", state="complete", expanded=False)
+
+            except Exception as e:
+                status_box.update(label="❌ Oups, une erreur s'est produite.", state="error", expanded=True)
+                st.error(str(e))
+                return
+
+        # 7. Affichage des résultats dans une belle interface
+        st.markdown("---")
+        st.markdown("## 🍿 Ton contenu est prêt ! ")
+        
+        # Affichage des infos
+        info_tab, video_tab = st.tabs(["📄 Informations", "🎥 Vidéo(s)"])
+        
+        with info_tab:
+            st.info(f"**Titre suggéré :** {title}")
+            st.write(f"**Hashtags :** " + " ".join(ai_data.get('hashtags', [])))
+            st.write("*(Copie ces éléments pour ta description TikTok/YouTube)*")
+            
+        with video_tab:
+            if format_choisi == "short_single":
                 st.video(str(video_path))
                 
-                st.subheader("🖼️ Miniature générée")
-                st.image(str(thumb_path), width=300)
-
             elif format_choisi == "short_twoparts":
-                progress.progress(40)
-                full_video_path = generate_video_pipeline(ai_data.get("script_principal", []), "portrait", status.info)
-                status.info("✂️ Découpage de la vidéo en 2 parties...")
-                total_duration = get_media_duration(full_video_path)
-                part1, part2 = split_video_in_two(full_video_path, total_duration, OUTPUT_DIR)
-                
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.subheader("Partie 1")
-                    st.video(str(part1))
+                    st.caption("Partie 1")
+                    st.video(str(video_path[0]))
                 with col2:
-                    st.subheader("Partie 2")
-                    st.video(str(part2))
-                
-                st.subheader("🖼️ Miniature générée")
-                st.image(str(thumb_path), width=300)
-
+                    st.caption("Partie 2")
+                    st.video(str(video_path[1]))
+                    
             elif format_choisi == "long_plus_teaser":
-                progress.progress(30)
-                long_path = generate_video_pipeline(ai_data.get("script_principal", []), "landscape", status.info)
-                progress.progress(70)
-                short_path = generate_video_pipeline(ai_data.get("script_teaser", []), "portrait", status.info)
-                
-                st.subheader("📺 Vidéo Longue (16:9)")
-                st.video(str(long_path))
-                
+                st.subheader("📺 Format Long (16:9)")
+                st.video(str(video_path[0]))
+                st.divider()
                 st.subheader("📱 Teaser Short (9:16)")
-                st.video(str(short_path))
+                st.video(str(video_path[1]))
                 
-                st.subheader("🖼️ Miniature générée")
-                st.image(str(thumb_path), width=500)
-
-            progress.progress(100)
-            status.success("🎉 Production terminée ! Tout est prêt pour la publication.")
-
-        except Exception as e:
-            progress.progress(100)
-            st.error(f"❌ ÉCHEC DE PRODUCTION : {e}")
+        st.balloons() # Petite animation de célébration finale !
 
 if __name__ == "__main__":
     main()
