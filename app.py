@@ -375,9 +375,13 @@ def main():
     st.set_page_config(page_title=APP_TITLE, page_icon="🧠", layout="centered")
     st.title("🧠 Cerveau Curieux — Studio IA Autonome")
     
+    # --- LES 3 LIGNES SONT AJOUTÉES ICI ---
+    st.info(f"📁 Dossier analysé : {BASE_DIR}")
+    fichiers_sfx = [f.name for f in BASE_DIR.iterdir() if f.is_file() and "sfx" in f.name]
+    st.info(f"🎵 Fichiers audio vus par le serveur : {fichiers_sfx}")
+    # --------------------------------------
+
     # Alerte si les fichiers audio sont manquants sur le serveur Streamlit
-    if not SFX_FILE.exists() or not CLICK_SFX_FILE.exists():
-        st.warning("⚠️ Les fichiers sonores (sfx_whoosh.mp3 ou sfx_ding.mp3) sont introuvables. Vérifie qu'ils sont bien sur ton GitHub avec ces noms exacts (les majuscules comptent sous Linux).")
 
     cleanup_old_temp_dirs()
     topic = st.text_area("Sujet de la vidéo :", placeholder="Ex: L'effet Mandela, pourquoi notre cerveau invente des souvenirs ?")
