@@ -25,7 +25,9 @@ OUTPUT_DIR = BASE_DIR / "output"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
+# Récupération automatique depuis les secrets Streamlit ou l'environnement
+PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY") or (st.secrets.get("PEXELS_API_KEY", "") if hasattr(st, "secrets") else "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or (st.secrets.get("GEMINI_API_KEY", "") if hasattr(st, "secrets") else "")
 
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
@@ -115,7 +117,6 @@ def generate_tts(text: str, output_path: Path):
     cmd = ["edge-tts", "--voice", TTS_VOICE, "--text", text, "--write-media", str(output_path)]
     run_command(cmd)
 
-# 🚀 NOUVEAU PROMPT DE RÉTENTION
 SYSTEM_PROMPT = """Tu es le réalisateur IA de 'Cerveau Curieux'. Ton but est de créer des scripts de vidéos ultra-dynamiques (min 45 secondes).
 
 RÈGLES DE NARRATION (STYLE STREET/URBAIN) :
@@ -134,9 +135,9 @@ RÈGLES VISUELLES (`visual_query`) :
 - POUR LA DERNIÈRE SCÈNE (CTA) : Le visuel DOIT OBLIGATOIREMENT être ultra-positif (ex: "smiling person thumbs up", "happy cheering"). JAMAIS de geste négatif.
 """
 
-def generate_script_gemini(topic: str, api_key: str, status_cb) -> Dict:
-    if not api_key: raise RuntimeError("Clé API GEMINI manquante.")
-    client = genai.Client(api_key=api_key)
+def generate_script_gemini(topic: str, status_cb) -> Dict:
+    if not GEMINI_API_KEY: raise RuntimeError("Clé API GEMINI manquante dans les secrets.")
+    client = genai.Client(api_key=GEMINI_API_KEY)
     status_cb("🧠 Analyse du sujet et rédaction du script en cours...")
 
     try:
@@ -278,7 +279,6 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         is_last_scene = (idx == total_scenes - 1)
         sfx_to_use = CLICK_SFX_FILE if (is_last_scene and CLICK_SFX_FILE.exists()) else (SFX_FILE if (idx > 0 and SFX_FILE.exists()) else None)
 
-        # 🚀 MODIFICATION 2 : COUPURE AUDIO (SILENCEREMOVE) INTÉGRÉE ICI
         if sfx_to_use:
             cmd_mix = [
                 FFMPEG_BIN, "-y", "-i", str(temp_audio), "-i", str(sfx_to_use),
@@ -329,7 +329,6 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
             fallback = work_dir / f"fallback_{idx:03d}.png"
             Image.new("RGB", (width, height), color=(20, 20, 35)).save(fallback)
             frames = int(duration * fps)
-            # 🚀 MODIFICATION 3 : ZOOM ACCÉLÉRÉ (0.0025)
             base_filter = f"[0:v]zoompan=z='min(zoom+0.0025,1.3)':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',scale={width}:{height}{flash_effect}[bg]"
             cmd = [FFMPEG_BIN, "-y", "-loop", "1", "-i", fallback.name, "-i", str(mascot_img.resolve())]
 
@@ -423,16 +422,10 @@ def main():
 
     cleanup_old_temp_dirs()
     
-    # Sécurisation de la clé d'API directement dans l'interface
-    api_key = st.text_input("Clé API Google Gemini :", type="password")
-    
     st.markdown("### 📝 Quel est ton sujet aujourd'hui ?")
     topic = st.text_area("Sujet", placeholder="Ex: L'effet Mandela...", label_visibility="collapsed", height=120)
     
     if st.button("🚀 LANCER LA MAGIE"):
-        if not api_key:
-            st.warning("⚠️ Merci d'insérer ta clé API Gemini.")
-            return
         if not topic.strip():
             st.warning("⚠️ Oups ! Tu as oublié d'écrire un sujet.")
             return
@@ -442,7 +435,7 @@ def main():
                 def update_status(msg):
                     st.write(msg)
                 
-                ai_data = generate_script_gemini(topic, api_key, update_status)
+                ai_data = generate_script_gemini(topic, update_status)
                 format_choisi = ai_data.get("format_choisi", "short_single")
                 title = ai_data.get("title", "Cerveau Curieux")
                 
@@ -481,7 +474,6 @@ def main():
             st.write("*(Copie ces éléments pour ta description TikTok/YouTube)*")
             
             st.markdown("---")
-            # 🚀 MODIFICATION 4 : LE MENU DÉROULANT POUR COPIER LE SCRIPT (POUR CLAUDE)
             with st.expander("📜 Voir le script complet (pour l'audit de Claude)"):
                 script_complet = ""
                 for idx, scene in enumerate(ai_data.get("script_principal", [])):
