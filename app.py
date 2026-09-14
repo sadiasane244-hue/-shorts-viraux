@@ -7,7 +7,7 @@ import subprocess
 import requests
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
-from PIL import Image, ImageDraw
+from PIL import Image
 import streamlit as st
 from pydantic import BaseModel, Field
 from google import genai
@@ -25,18 +25,17 @@ OUTPUT_DIR = BASE_DIR / "output"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Récupération automatique depuis les secrets Streamlit ou l'environnement
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY") or (st.secrets.get("PEXELS_API_KEY", "") if hasattr(st, "secrets") else "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or (st.secrets.get("GEMINI_API_KEY", "") if hasattr(st, "secrets") else "")
 
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
 
-TTS_VOICE = "fr-FR-HenriNeural"
+TTS_VOICE = "fr-FR-RemyNeural"
 
-# Recherche dynamique des fichiers sonores
 SFX_FILE = next((f for f in BASE_DIR.iterdir() if f.is_file() and "sfx_whoosh" in f.name), BASE_DIR / "sfx_whoosh.mp3")
 CLICK_SFX_FILE = next((f for f in BASE_DIR.iterdir() if f.is_file() and "sfx_ding" in f.name), BASE_DIR / "sfx_ding.mp3")
+BGM_FILE = next((f for f in BASE_DIR.iterdir() if f.is_file() and "bgm" in f.name), BASE_DIR / "bgm.mp3")
 
 MASCOT_FILES = {
     "default": BASE_DIR / "mascot_default.png",
@@ -51,7 +50,6 @@ MASCOT_FILES = {
     "sad": BASE_DIR / "mascot_sad.png",
 }
 
-# Crée une mascotte de secours si le fichier par défaut n'existe pas
 if not MASCOT_FILES["default"].exists():
     Image.new('RGBA', (200, 200), color=(0, 0, 0, 0)).save(MASCOT_FILES["default"])
 
@@ -68,7 +66,7 @@ class ScriptOutput(BaseModel):
     format_choisi: str = Field(description="Choix parmi: short_single, short_twoparts, long_plus_teaser")
     title: str = Field(description="Titre captivant et très accrocheur (3 à 6 mots max)")
     hashtags: List[str] = Field(description="Liste de 4 à 6 hashtags pertinents")
-    script_principal: List[Scene] = Field(description="Scènes de la vidéo (au moins 12 à 15 scènes pour rythme rapide). La dernière scène est l'appel à l'action.")
+    script_principal: List[Scene] = Field(description="Scènes de la vidéo (au moins 12 à 15 scènes). La première commence par 'Wesh l'équipe' ou 'Wesh les gars'.")
     script_teaser: List[Scene] = Field(default=[], description="Scènes du teaser si le format long_plus_teaser est choisi")
 
 # ============================================================
@@ -113,30 +111,46 @@ def qc_validate_video(video_path: Path):
 # TTS & GEMINI
 # ============================================================
 
+def fix_phonetics_for_tts(text: str) -> str:
+    replacements = {
+        r'\bbugges\b': 'beugues',
+        r'\bbugge\b': 'beugue',
+        r'\bbug\b': 'beugue',
+        r'\bbugger\b': 'beuguer',
+        r'\bbuggué\b': 'beugué',
+    }
+    cleaned = text
+    for pattern, repl in replacements.items():
+        cleaned = re.sub(pattern, repl, cleaned, flags=re.IGNORECASE)
+    return cleaned
+
 def generate_tts(text: str, output_path: Path):
-    cmd = ["edge-tts", "--voice", TTS_VOICE, "--text", text, "--write-media", str(output_path)]
+    spoken_text = fix_phonetics_for_tts(text)
+    cmd = ["edge-tts", "--voice", TTS_VOICE, "--text", spoken_text, "--write-media", str(output_path)]
     run_command(cmd)
 
 SYSTEM_PROMPT = """Tu es le réalisateur IA de 'Cerveau Curieux'. Ton but est de créer des scripts de vidéos ultra-dynamiques (min 45 secondes).
 
-RÈGLES DE NARRATION (STYLE STREET/URBAIN) :
-- Utilise un vocabulaire très jeune, "street" et urbain (ex : "une dinguerie", "frérot", "wesh l'équipe", "carrément", "ça rend ouf", "le cerveau il pète un câble", "bref").
-- Le ton doit être ultra-familier, direct et dynamique. Tutoiement obligatoire.
-- INTERDICTION STRICTE d'utiliser des insultes ou du vocabulaire vulgaire.
-- Explique le sujet avec des exemples très concrets.
+RÈGLES D'ACCROCHE IMMÉDIATE :
+- La première scène DOIT IMPÉRATIVEMENT commencer par 'Wesh l'équipe' ou 'Wesh les gars' pour poser le gimmick de marque.
 
-RÈGLES DE DÉCOUPAGE (TRÈS IMPORTANT) :
-- DÉCOUPE LE SCRIPT : 1 seule phrase TRÈS COURTE par scène (maximum 3 secondes de lecture par scène). 
-- Une vidéo doit contenir au minimum 12 à 15 scènes pour un rythme frénétique.
-- Termine la dernière scène par un appel à l'action hyper positif ("Abonne-toi frérot", "Lâche ton like").
+RÈGLES DE NARRATION (STYLE STREET/URBAIN) :
+- Vocabulaire très jeune et urbain (ex: 'une dinguerie', 'frérot', 'ça rend ouf', 'reset gratuit', 'le cerveau il pète un câble').
+- Tutoiement et ton énergique.
+- INTERDICTION STRICTE d'insultes ou vulgarités.
+
+RÈGLES DE DÉCOUPAGE :
+- 1 seule phrase TRÈS COURTE par scène (maximum 3 secondes). 
+- Au moins 12 à 15 scènes.
+- Dernière scène = appel à l'action hyper positif ('Abonne-toi frérot pour devenir plus intelligent chaque jour').
 
 RÈGLES VISUELLES (`visual_query`) :
-- Actions physiques et concrètes uniquement (2 à 4 mots en ANGLAIS).
-- POUR LA DERNIÈRE SCÈNE (CTA) : Le visuel DOIT OBLIGATOIREMENT être ultra-positif (ex: "smiling person thumbs up", "happy cheering"). JAMAIS de geste négatif.
+- Actions physiques et concrètes (2 à 4 mots en ANGLAIS).
+- Pour le CTA final : 'smiling person thumbs up HD portrait'.
 """
 
 def generate_script_gemini(topic: str, status_cb) -> Dict:
-    if not GEMINI_API_KEY: raise RuntimeError("Clé API GEMINI manquante dans les secrets.")
+    if not GEMINI_API_KEY: raise RuntimeError("Clé API GEMINI manquante.")
     client = genai.Client(api_key=GEMINI_API_KEY)
     status_cb("🧠 Analyse du sujet et rédaction du script en cours...")
 
@@ -166,16 +180,16 @@ def search_pexels_video(query: str, orientation: str) -> Optional[str]:
     words = [w for w in re.sub(r'[^a-zA-Z\s]', '', query).split() if len(w) > 2]
     clean_query = " ".join(words[:4])
     
-    url = f"https://api.pexels.com/videos/search?query={clean_query}&orientation={orientation}&per_page=5"
+    url = f"https://api.pexels.com/videos/search?query={clean_query}&orientation={orientation}&per_page=10"
     headers = {"Authorization": PEXELS_API_KEY}
     try:
         r = requests.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
             for v in r.json().get("videos", []):
-                files = sorted(v.get("video_files", []), key=lambda x: x.get("width", 0), reverse=True)
-                for f in files:
-                    if ".mp4" in str(f.get("link", "")).lower():
-                        return f.get("link")
+                files = [f for f in v.get("video_files", []) if ".mp4" in str(f.get("link", "")).lower()]
+                files = sorted(files, key=lambda x: x.get("width", 0), reverse=True)
+                if files:
+                    return files[0].get("link")
     except Exception: pass
     return None
 
@@ -190,7 +204,7 @@ def download_file(url: str, dest: Path) -> bool:
 
 def create_ass_subtitles(scenes: List[Dict], output_ass: Path, width: int, height: int):
     font_size = 56 if width == 1080 else 38
-    margin_v = 300 if height == 1920 else 70
+    margin_v = 320 if height == 1920 else 70
     
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -255,7 +269,7 @@ def split_video_in_two(input_video: Path, total_duration: float, out_dir: Path) 
     return part1, part2
 
 # ============================================================
-# PIPELINE GLOBAL
+# PIPELINE GLOBAL AVEC TRANSITIONS SLIDE
 # ============================================================
 
 def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status_cb) -> Path:
@@ -266,12 +280,13 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
     width, height = (1080, 1920) if video_format == "portrait" else (1920, 1080)
     orientation = "portrait" if video_format == "portrait" else "landscape"
 
-    status_cb("🎙️ Génération de la voix off et mixage audio...")
+    status_cb("🎙️ Génération de la voix off et synchronisation audio...")
     audio_clips = []
     total_scenes = len(script_scenes)
 
     for idx, scene in enumerate(script_scenes):
         temp_audio = work_dir / f"temp_audio_{idx:03d}.mp3"
+        trimmed_audio = work_dir / f"trimmed_audio_{idx:03d}.mp3"
         final_audio = work_dir / f"audio_{idx:03d}.mp3"
         
         generate_tts(scene["text"], temp_audio)
@@ -279,36 +294,56 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         is_last_scene = (idx == total_scenes - 1)
         sfx_to_use = CLICK_SFX_FILE if (is_last_scene and CLICK_SFX_FILE.exists()) else (SFX_FILE if (idx > 0 and SFX_FILE.exists()) else None)
 
-        # 🚀 MODIFICATION 2 : COUPURE AUDIO (MÉTHODE AREVERSE SÉCURISÉE)
-        # On passe l'audio à l'envers, on coupe le début (le silence), et on le remet à l'endroit.
         if sfx_to_use:
             cmd_mix = [
                 FFMPEG_BIN, "-y", "-i", str(temp_audio), "-i", str(sfx_to_use),
-                "-filter_complex", "[0:a]areverse,silenceremove=start_periods=1:start_duration=0:start_threshold=-40dB,areverse[voice];[1:a]volume=0.15[sfx];[voice][sfx]amix=inputs=2:duration=first[mix];[mix]volume=2.0[a]",
-                "-map", "[a]", str(final_audio)
+                "-filter_complex", "[0:a]areverse,silenceremove=start_periods=1:start_duration=0:start_threshold=-40dB,areverse[voice];[1:a]volume=0.20[sfx];[voice][sfx]amix=inputs=2:duration=first[mix];[mix]volume=2.0[a]",
+                "-map", "[a]", str(trimmed_audio)
             ]
             run_command(cmd_mix, cwd=work_dir)
         else:
             cmd_trim = [
                 FFMPEG_BIN, "-y", "-i", str(temp_audio),
                 "-af", "areverse,silenceremove=start_periods=1:start_duration=0:start_threshold=-40dB,areverse",
-                str(final_audio)
+                str(trimmed_audio)
             ]
             run_command(cmd_trim, cwd=work_dir)
+
+        if is_last_scene:
+            cmd_pad = [FFMPEG_BIN, "-y", "-i", str(trimmed_audio), "-af", "pad=pad_dur=1.0", str(final_audio)]
+            run_command(cmd_pad, cwd=work_dir)
+        else:
+            final_audio = trimmed_audio
 
         scene["duration"] = get_media_duration(final_audio)
         audio_clips.append(final_audio)
 
+    # Concaténation Audio Globale
     with open(work_dir / "concat_audio.txt", "w") as f:
         for a in audio_clips: f.write(f"file '{a.name}'\n")
-    run_command([FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", "concat_audio.txt", "-c", "copy", "full_audio.mp3"], cwd=work_dir)
+    
+    raw_audio = work_dir / "raw_audio.mp3"
+    run_command([FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", "concat_audio.txt", "-c", "copy", str(raw_audio)], cwd=work_dir)
 
-    status_cb("🎥 Montage visuel et incrustation de la marque...")
+    # Ajout Musique de Fond (BGM) si disponible
+    full_audio = work_dir / "full_audio.mp3"
+    if BGM_FILE.exists():
+        cmd_bgm = [
+            FFMPEG_BIN, "-y", "-i", str(raw_audio), "-stream_loop", "-1", "-i", str(BGM_FILE),
+            "-filter_complex", "[1:a]volume=0.08[bgm];[0:a][bgm]amix=inputs=2:duration=first[a]",
+            "-map", "[a]", str(full_audio)
+        ]
+        run_command(cmd_bgm, cwd=work_dir)
+    else:
+        shutil.copy(raw_audio, full_audio)
+
+    status_cb("🎥 Assemblage des scènes et génération des transitions animées...")
     video_clips = []
+    clip_durations = []
     fps = 25
-    mascot_scale = int(width * 0.22) if video_format == "portrait" else int(width * 0.15)
+    mascot_scale = int(width * 0.20) if video_format == "portrait" else int(width * 0.14)
     pos_x = "(W-w)/2" if video_format == "portrait" else "40"
-    pos_y = "H-h-450" if video_format == "portrait" else "H-h-40"
+    pos_y = "H-h-500" if video_format == "portrait" else "H-h-40"
 
     for idx, scene in enumerate(script_scenes):
         duration = scene["duration"]
@@ -320,30 +355,56 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         visual_file = work_dir / f"src_vis_{idx:03d}.mp4"
         output_clip = work_dir / f"clip_{idx:03d}.mp4"
         
-        display_duration = min(4.0, duration) 
+        display_duration = min(3.5, duration) 
         enable_expr = f"between(t,0,{display_duration})"
-        flash_effect = ",colorchannelmixer=rr=1.8:gg=1.8:bb=1.8:enable='between(t,0,0.15)'" if idx > 0 else ""
 
         if url and download_file(url, visual_file):
-            base_filter = f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}{flash_effect}[bg]"
+            base_filter = f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}[bg]"
             cmd = [FFMPEG_BIN, "-y", "-stream_loop", "-1", "-i", visual_file.name, "-i", str(mascot_img.resolve())]
         else:
             fallback = work_dir / f"fallback_{idx:03d}.png"
             Image.new("RGB", (width, height), color=(20, 20, 35)).save(fallback)
             frames = int(duration * fps)
-            base_filter = f"[0:v]zoompan=z='min(zoom+0.0025,1.3)':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',scale={width}:{height}{flash_effect}[bg]"
+            base_filter = f"[0:v]zoompan=z='min(zoom+0.0025,1.3)':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',scale={width}:{height}[bg]"
             cmd = [FFMPEG_BIN, "-y", "-loop", "1", "-i", fallback.name, "-i", str(mascot_img.resolve())]
 
         filter_complex = f"{base_filter};[1:v]scale={mascot_scale}:-1[mascot];[bg][mascot]overlay=x={pos_x}:y={pos_y}:enable='{enable_expr}'[v_out]"
         cmd.extend(["-t", str(duration), "-filter_complex", filter_complex, "-map", "[v_out]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), output_clip.name])
         run_command(cmd, cwd=work_dir)
         video_clips.append(output_clip)
+        clip_durations.append(duration)
 
-    with open(work_dir / "concat_video.txt", "w") as f:
-        for v in video_clips: f.write(f"file '{v.name}'\n")
-    run_command([FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", "concat_video.txt", "-c", "copy", "raw_video.mp4"], cwd=work_dir)
+    # Application des transitions XFADE (Slide Up / Slide Left)
+    status_cb("✨ Application des transitions de glissement entre les scènes...")
+    raw_video = work_dir / "raw_video.mp4"
+    
+    if len(video_clips) == 1:
+        shutil.copy(video_clips[0], raw_video)
+    else:
+        transition_types = ["slideup", "slideleft", "slideright", "slidedown"]
+        trans_duration = 0.25  # Durée du glissement (0.25 sec)
+        
+        filter_str = ""
+        inputs = []
+        for v in video_clips:
+            inputs.extend(["-i", v.name])
+            
+        current_offset = clip_durations[0] - trans_duration
+        last_out = "0:v"
+        
+        for i in range(1, len(video_clips)):
+            trans_mode = transition_types[(i - 1) % len(transition_types)]
+            next_out = f"vtrans{i}"
+            filter_str += f"[{last_out}][{i}:v]xfade=transition={trans_mode}:duration={trans_duration}:offset={current_offset:.2f}[{next_out}];"
+            last_out = next_out
+            if i < len(video_clips) - 1:
+                current_offset += clip_durations[i] - trans_duration
 
-    status_cb("⚙️ Incrustation des sous-titres, du Watermark et finalisation audio...")
+        filter_str = filter_str.rstrip(";")
+        cmd_xfade = [FFMPEG_BIN, "-y"] + inputs + ["-filter_complex", filter_str, "-map", f"[{last_out}]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "raw_video.mp4"]
+        run_command(cmd_xfade, cwd=work_dir)
+
+    status_cb("⚙️ Incrustation des sous-titres, du Watermark et exportation...")
     create_ass_subtitles(script_scenes, work_dir / "subtitles.ass", width, height)
 
     watermark_x = 40
@@ -371,7 +432,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
     return final_output
 
 # ============================================================
-# INTERFACE STREAMLIT (EMBELLIE)
+# INTERFACE STREAMLIT
 # ============================================================
 
 def main():
@@ -417,7 +478,7 @@ def main():
         
         st.markdown("---")
         st.markdown("🎯 **Mode Autonome Actif**")
-        st.write("L'IA détecte le format idéal selon la longueur et la complexité de ton sujet.")
+        st.write("Génération de transitions dynamiques (Slide) et synchronisation audio/visuel.")
 
     st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Studio IA Autonome 🎬</div>', unsafe_allow_html=True)
@@ -425,9 +486,9 @@ def main():
     cleanup_old_temp_dirs()
     
     st.markdown("### 📝 Quel est ton sujet aujourd'hui ?")
-    topic = st.text_area("Sujet", placeholder="Ex: L'effet Mandela...", label_visibility="collapsed", height=120)
+    topic = st.text_area("Sujet", placeholder="Ex: L'effet de porte ou le décalage horaire...", label_visibility="collapsed", height=120)
     
-    if st.button("🚀 LANCER LA MAGIE"):
+    if st.button("🚀 LANCER LA GÉNÉRATION"):
         if not topic.strip():
             st.warning("⚠️ Oups ! Tu as oublié d'écrire un sujet.")
             return
@@ -476,7 +537,7 @@ def main():
             st.write("*(Copie ces éléments pour ta description TikTok/YouTube)*")
             
             st.markdown("---")
-            with st.expander("📜 Voir le script complet (pour l'audit de Claude)"):
+            with st.expander("📜 Voir le script complet"):
                 script_complet = ""
                 for idx, scene in enumerate(ai_data.get("script_principal", [])):
                     script_complet += f"**Scène {idx + 1}** : {scene.get('text', '')}\n\n"
