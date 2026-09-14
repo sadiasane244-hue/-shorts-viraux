@@ -31,7 +31,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or (st.secrets.get("GEMINI_API
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
 
-TTS_VOICE = "fr-FR-RemyNeural"
+TTS_VOICE = "fr-FR-HenriNeural"
 
 SFX_FILE = next((f for f in BASE_DIR.iterdir() if f.is_file() and "sfx_whoosh" in f.name), BASE_DIR / "sfx_whoosh.mp3")
 CLICK_SFX_FILE = next((f for f in BASE_DIR.iterdir() if f.is_file() and "sfx_ding" in f.name), BASE_DIR / "sfx_ding.mp3")
