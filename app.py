@@ -310,7 +310,8 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
             run_command(cmd_trim, cwd=work_dir)
 
         if is_last_scene:
-            cmd_pad = [FFMPEG_BIN, "-y", "-i", str(trimmed_audio), "-af", "pad=pad_dur=1.0", str(final_audio)]
+            cmd_pad = [FFMPEG_BIN, "-y", "-i", str(trimmed_audio), "-af", "apad=pad_dur=1.0", str(final_audio)]
+
             run_command(cmd_pad, cwd=work_dir)
         else:
             final_audio = trimmed_audio
