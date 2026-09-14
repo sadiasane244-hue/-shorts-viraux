@@ -279,17 +279,19 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         is_last_scene = (idx == total_scenes - 1)
         sfx_to_use = CLICK_SFX_FILE if (is_last_scene and CLICK_SFX_FILE.exists()) else (SFX_FILE if (idx > 0 and SFX_FILE.exists()) else None)
 
+        # 🚀 MODIFICATION 2 : COUPURE AUDIO (MÉTHODE AREVERSE SÉCURISÉE)
+        # On passe l'audio à l'envers, on coupe le début (le silence), et on le remet à l'endroit.
         if sfx_to_use:
             cmd_mix = [
                 FFMPEG_BIN, "-y", "-i", str(temp_audio), "-i", str(sfx_to_use),
-                "-filter_complex", "[0:a]silenceremove=stop_periods=1:stop_duration=0:stop_threshold=-35dB[voice];[1:a]volume=0.15[sfx];[voice][sfx]amix=inputs=2:duration=first[mix];[mix]volume=2.0[a]",
+                "-filter_complex", "[0:a]areverse,silenceremove=start_periods=1:start_duration=0:start_threshold=-40dB,areverse[voice];[1:a]volume=0.15[sfx];[voice][sfx]amix=inputs=2:duration=first[mix];[mix]volume=2.0[a]",
                 "-map", "[a]", str(final_audio)
             ]
             run_command(cmd_mix, cwd=work_dir)
         else:
             cmd_trim = [
                 FFMPEG_BIN, "-y", "-i", str(temp_audio),
-                "-af", "silenceremove=stop_periods=1:stop_duration=0:stop_threshold=-35dB",
+                "-af", "areverse,silenceremove=start_periods=1:start_duration=0:start_threshold=-40dB,areverse",
                 str(final_audio)
             ]
             run_command(cmd_trim, cwd=work_dir)
