@@ -70,7 +70,7 @@ class ScriptOutput(BaseModel):
     script_teaser: List[Scene] = Field(default=[], description="Scènes du teaser si le format long_plus_teaser est choisi")
 
 # ============================================================
-# OUTILS ET EXÉCUTION
+# OUTILS ET EXÉCUTION SHELL
 # ============================================================
 
 def cleanup_old_temp_dirs(max_age_hours=1):
@@ -269,7 +269,7 @@ def split_video_in_two(input_video: Path, total_duration: float, out_dir: Path) 
     return part1, part2
 
 # ============================================================
-# PIPELINE GLOBAL AVEC TRANSITIONS SLIDE
+# PIPELINE GLOBAL VIDEO
 # ============================================================
 
 def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status_cb) -> Path:
@@ -311,7 +311,6 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
 
         if is_last_scene:
             cmd_pad = [FFMPEG_BIN, "-y", "-i", str(trimmed_audio), "-af", "apad=pad_dur=1.0", str(final_audio)]
-
             run_command(cmd_pad, cwd=work_dir)
         else:
             final_audio = trimmed_audio
@@ -326,7 +325,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
     raw_audio = work_dir / "raw_audio.mp3"
     run_command([FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", "concat_audio.txt", "-c", "copy", str(raw_audio)], cwd=work_dir)
 
-    # Ajout Musique de Fond (BGM) si disponible
+    # Musique de fond optionnelle (BGM)
     full_audio = work_dir / "full_audio.mp3"
     if BGM_FILE.exists():
         cmd_bgm = [
@@ -338,9 +337,8 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
     else:
         shutil.copy(raw_audio, full_audio)
 
-    status_cb("🎥 Assemblage des scènes et génération des transitions animées...")
+    status_cb("🎥 Assemblage dynamique des scènes visuelles...")
     video_clips = []
-    clip_durations = []
     fps = 25
     mascot_scale = int(width * 0.20) if video_format == "portrait" else int(width * 0.14)
     pos_x = "(W-w)/2" if video_format == "portrait" else "40"
@@ -373,37 +371,24 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         cmd.extend(["-t", str(duration), "-filter_complex", filter_complex, "-map", "[v_out]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), output_clip.name])
         run_command(cmd, cwd=work_dir)
         video_clips.append(output_clip)
-        clip_durations.append(duration)
 
-    # Application des transitions XFADE (Slide Up / Slide Left)
-    status_cb("✨ Application des transitions de glissement entre les scènes...")
+    # Assemblage léger ultra-rapide anti-crash (0 RAM)
+    status_cb("⚡ Fusion ultra-rapide des scènes (mode éco-RAM)...")
     raw_video = work_dir / "raw_video.mp4"
     
     if len(video_clips) == 1:
         shutil.copy(video_clips[0], raw_video)
     else:
-        transition_types = ["slideup", "slideleft", "slideright", "slidedown"]
-        trans_duration = 0.25  # Durée du glissement (0.25 sec)
-        
-        filter_str = ""
-        inputs = []
-        for v in video_clips:
-            inputs.extend(["-i", v.name])
-            
-        current_offset = clip_durations[0] - trans_duration
-        last_out = "0:v"
-        
-        for i in range(1, len(video_clips)):
-            trans_mode = transition_types[(i - 1) % len(transition_types)]
-            next_out = f"vtrans{i}"
-            filter_str += f"[{last_out}][{i}:v]xfade=transition={trans_mode}:duration={trans_duration}:offset={current_offset:.2f}[{next_out}];"
-            last_out = next_out
-            if i < len(video_clips) - 1:
-                current_offset += clip_durations[i] - trans_duration
-
-        filter_str = filter_str.rstrip(";")
-        cmd_xfade = [FFMPEG_BIN, "-y"] + inputs + ["-filter_complex", filter_str, "-map", f"[{last_out}]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "raw_video.mp4"]
-        run_command(cmd_xfade, cwd=work_dir)
+        concat_file = work_dir / "concat_video.txt"
+        with open(concat_file, "w") as f:
+            for v in video_clips:
+                f.write(f"file '{v.name}'\n")
+                
+        cmd_concat = [
+            FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0",
+            "-i", "concat_video.txt", "-c", "copy", "raw_video.mp4"
+        ]
+        run_command(cmd_concat, cwd=work_dir)
 
     status_cb("⚙️ Incrustation des sous-titres, du Watermark et exportation...")
     create_ass_subtitles(script_scenes, work_dir / "subtitles.ass", width, height)
@@ -479,7 +464,7 @@ def main():
         
         st.markdown("---")
         st.markdown("🎯 **Mode Autonome Actif**")
-        st.write("Génération de transitions dynamiques (Slide) et synchronisation audio/visuel.")
+        st.write("Génération optimisée pour Streamlit Cloud (Anti-Crash RAM).")
 
     st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Studio IA Autonome 🎬</div>', unsafe_allow_html=True)
@@ -487,7 +472,7 @@ def main():
     cleanup_old_temp_dirs()
     
     st.markdown("### 📝 Quel est ton sujet aujourd'hui ?")
-    topic = st.text_area("Sujet", placeholder="Ex: L'effet de porte ou le décalage horaire...", label_visibility="collapsed", height=120)
+    topic = st.text_area("Sujet", placeholder="Ex: Pourquoi le cerveau oublie-t-il ce qu'il est venu chercher en passant une porte ?", label_visibility="collapsed", height=120)
     
     if st.button("🚀 LANCER LA GÉNÉRATION"):
         if not topic.strip():
@@ -566,3 +551,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
