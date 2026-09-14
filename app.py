@@ -142,7 +142,7 @@ def generate_script_gemini(topic: str, status_cb) -> Dict:
 
     try:
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-2.5-flash',
             contents=f"Sujet : {topic}",
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
@@ -155,7 +155,7 @@ def generate_script_gemini(topic: str, status_cb) -> Dict:
             return response.parsed.model_dump()
         return json.loads(response.text)
     except Exception as e:
-        raise RuntimeError(f"Erreur Gemini Flash : {e}")
+        raise RuntimeError(f"Erreur Gemini : {e}")
 
 # ============================================================
 # VISUELS & SOUS-TITRES
