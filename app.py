@@ -142,7 +142,7 @@ def generate_script_gemini(topic: str, status_cb) -> Dict:
 
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=f"Sujet : {topic}",
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
