@@ -5,7 +5,6 @@ import re
 import shutil
 import subprocess
 import random
-import html
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
@@ -30,22 +29,50 @@ OUTPUT_DIR = BASE_DIR / "output"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+
+# ============================================================
+# CLÉS API
+# ============================================================
+
 PEXELS_API_KEY = (
     os.environ.get("PEXELS_API_KEY")
-    or (st.secrets.get("PEXELS_API_KEY", "") if hasattr(st, "secrets") else "")
+    or (
+        st.secrets.get("PEXELS_API_KEY", "")
+        if hasattr(st, "secrets")
+        else ""
+    )
 )
 
 GEMINI_API_KEY = (
     os.environ.get("GEMINI_API_KEY")
-    or (st.secrets.get("GEMINI_API_KEY", "") if hasattr(st, "secrets") else "")
+    or (
+        st.secrets.get("GEMINI_API_KEY", "")
+        if hasattr(st, "secrets")
+        else ""
+    )
 )
+
+
+# ============================================================
+# BINAIRES
+# ============================================================
 
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
 
-TTS_VOICE = "fr-FR-HenriNeural"
 
-# Signature de marque
+# ============================================================
+# TTS
+# ============================================================
+
+TTS_VOICE = "fr-FR-HenriNeural"
+TTS_RATE = "+5%"
+
+
+# ============================================================
+# IDENTITÉ DE MARQUE
+# ============================================================
+
 INTRO_SIGNATURE = "Wesh l'équipe"
 
 CTA_SIGNATURE = (
@@ -53,32 +80,61 @@ CTA_SIGNATURE = (
     "abonne-toi frérot, parce qu'on n'a pas fini de le faire buguer."
 )
 
-# Fichiers audio optionnels
+
+# ============================================================
+# OBJECTIFS DE DURÉE SHORT
+# ============================================================
+
+SHORT_MIN_DURATION = 45.0
+SHORT_TARGET_MIN_DURATION = 47.0
+SHORT_TARGET_MAX_DURATION = 58.0
+SHORT_MAX_DURATION = 60.0
+
+SHORT_MIN_WORDS = 130
+SHORT_TARGET_MIN_WORDS = 140
+SHORT_TARGET_MAX_WORDS = 155
+SHORT_MAX_WORDS = 165
+
+
+# ============================================================
+# AUDIO OPTIONNEL
+# ============================================================
+
 SFX_FILE = next(
     (
-        f for f in BASE_DIR.iterdir()
-        if f.is_file() and "sfx_whoosh" in f.name.lower()
+        f
+        for f in BASE_DIR.iterdir()
+        if f.is_file()
+        and "sfx_whoosh" in f.name.lower()
     ),
     BASE_DIR / "sfx_whoosh.mp3"
 )
 
 CLICK_SFX_FILE = next(
     (
-        f for f in BASE_DIR.iterdir()
-        if f.is_file() and "sfx_ding" in f.name.lower()
+        f
+        for f in BASE_DIR.iterdir()
+        if f.is_file()
+        and "sfx_ding" in f.name.lower()
     ),
     BASE_DIR / "sfx_ding.mp3"
 )
 
 BGM_FILE = next(
     (
-        f for f in BASE_DIR.iterdir()
-        if f.is_file() and "bgm" in f.name.lower()
+        f
+        for f in BASE_DIR.iterdir()
+        if f.is_file()
+        and "bgm" in f.name.lower()
     ),
     BASE_DIR / "bgm.mp3"
 )
 
-# Mascottes
+
+# ============================================================
+# MASCOTTES
+# ============================================================
+
 MASCOT_FILES = {
     "default": BASE_DIR / "mascot_default.png",
     "thinking": BASE_DIR / "mascot_thinking.png",
@@ -92,12 +148,15 @@ MASCOT_FILES = {
     "sad": BASE_DIR / "mascot_sad.png",
 }
 
+
 if not MASCOT_FILES["default"].exists():
     Image.new(
         "RGBA",
         (200, 200),
         color=(0, 0, 0, 0)
-    ).save(MASCOT_FILES["default"])
+    ).save(
+        MASCOT_FILES["default"]
+    )
 
 
 # ============================================================
@@ -108,20 +167,21 @@ class Scene(BaseModel):
     text: str = Field(
         description=(
             "Une seule phrase courte de narration. "
-            "Ton moderne, jeune, urbain et naturel, sans insultes."
+            "Ton moderne, jeune, urbain et naturel."
         )
     )
 
     emotion: str = Field(
         description=(
-            "Émotion parmi: default, thinking, confused, laughing, "
-            "explaining, surprised, angry, happy, shocked, sad"
+            "Émotion parmi: default, thinking, confused, "
+            "laughing, explaining, surprised, angry, "
+            "happy, shocked, sad"
         )
     )
 
     visual_query: str = Field(
         description=(
-            "Mots-clés visuels en ANGLAIS, 2 à 4 mots, "
+            "Mots-clés visuels en anglais, 2 à 4 mots, "
             "décrivant une action physique concrète."
         )
     )
@@ -130,57 +190,66 @@ class Scene(BaseModel):
 class ScriptOutput(BaseModel):
     format_choisi: str = Field(
         description=(
-            "Choix parmi: short_single, short_twoparts, long_plus_teaser"
+            "Choix parmi: short_single, short_twoparts, "
+            "long_plus_teaser"
         )
     )
 
     title: str = Field(
         description=(
-            "Titre YouTube/TikTok très accrocheur, fidèle au sujet, "
-            "basé sur la curiosité, sans mensonge ni promesse exagérée. "
-            "Maximum 65 caractères."
+            "Titre YouTube/TikTok très accrocheur, "
+            "fidèle au sujet, basé sur la curiosité, "
+            "sans mensonge. Maximum 65 caractères."
         )
     )
 
     hashtags: List[str] = Field(
         description=(
-            "4 à 6 hashtags très pertinents directement liés au sujet. "
-            "Éviter les hashtags génériques sans rapport."
+            "4 à 6 hashtags pertinents directement liés "
+            "au sujet."
         )
     )
 
     script_principal: List[Scene] = Field(
         description=(
             "Scènes principales de la vidéo. "
-            "La première scène commence obligatoirement par "
-            "'Wesh l'équipe'."
+            "Pour un Short, viser environ 130 à 155 mots. "
+            "La première scène commence obligatoirement "
+            "par 'Wesh l'équipe'."
         )
     )
 
     script_teaser: List[Scene] = Field(
         default=[],
         description=(
-            "Scènes du teaser si le format long_plus_teaser est choisi."
+            "Scènes du teaser si le format "
+            "long_plus_teaser est choisi."
         )
     )
 
 
 # ============================================================
-# OUTILS
+# OUTILS GÉNÉRAUX
 # ============================================================
 
 def cleanup_old_temp_dirs(max_age_hours=2):
+
     now = time.time()
 
     for item in TEMP_DIR.iterdir():
+
         if not item.is_dir():
             continue
 
         try:
+
             age = now - item.stat().st_mtime
 
             if age > max_age_hours * 3600:
-                shutil.rmtree(item, ignore_errors=True)
+                shutil.rmtree(
+                    item,
+                    ignore_errors=True
+                )
 
         except Exception:
             pass
@@ -191,9 +260,13 @@ def run_command(
     cwd: Optional[Path] = None
 ) -> subprocess.CompletedProcess:
 
-    cmd_str = [str(arg) for arg in command]
+    cmd_str = [
+        str(arg)
+        for arg in command
+    ]
 
     try:
+
         return subprocess.run(
             cmd_str,
             stdout=subprocess.PIPE,
@@ -204,16 +277,22 @@ def run_command(
         )
 
     except subprocess.CalledProcessError as e:
+
         raise RuntimeError(
             "Erreur Shell:\n"
             f"Commande: {' '.join(cmd_str)}\n"
-            f"Erreur: {e.stderr[-1500:]}"
+            f"Erreur: {e.stderr[-2000:]}"
         )
 
 
-def get_media_duration(file_path: Path) -> float:
+def get_media_duration(
+    file_path: Path
+) -> float:
 
-    if not file_path.exists() or file_path.stat().st_size == 0:
+    if (
+        not file_path.exists()
+        or file_path.stat().st_size == 0
+    ):
         return 0.0
 
     cmd = [
@@ -230,31 +309,66 @@ def get_media_duration(file_path: Path) -> float:
     res = run_command(cmd)
 
     try:
-        return float(res.stdout.strip())
+        return float(
+            res.stdout.strip()
+        )
     except ValueError:
         return 0.0
 
 
-def qc_validate_video(video_path: Path):
+def count_words_in_scenes(
+    scenes: List[Dict]
+) -> int:
+
+    total = 0
+
+    for scene in scenes or []:
+
+        text = str(
+            scene.get("text", "")
+        ).strip()
+
+        total += len(
+            text.split()
+        )
+
+    return total
+
+
+def qc_validate_video(
+    video_path: Path,
+    expected_format: Optional[str] = None
+):
 
     if not video_path.exists():
+
         raise RuntimeError(
-            "QC Échec : le fichier final n'a pas été généré."
+            "QC Échec : le fichier final "
+            "n'a pas été généré."
         )
 
     if video_path.stat().st_size < 10000:
+
         raise RuntimeError(
-            "QC Échec : le fichier vidéo semble vide ou corrompu."
+            "QC Échec : la vidéo semble vide "
+            "ou corrompue."
         )
 
-    duration = get_media_duration(video_path)
+    duration = get_media_duration(
+        video_path
+    )
 
     if duration <= 0:
+
         raise RuntimeError(
-            "QC Échec : impossible de lire la durée de la vidéo."
+            "QC Échec : impossible de lire "
+            "la durée de la vidéo."
         )
 
-    # Vérification vidéo
+    # --------------------------------------------------------
+    # VIDÉO
+    # --------------------------------------------------------
+
     cmd_video = [
         FFPROBE_BIN,
         "-v",
@@ -268,31 +382,81 @@ def qc_validate_video(video_path: Path):
         str(video_path)
     ]
 
-    res_video = run_command(cmd_video)
+    res_video = run_command(
+        cmd_video
+    )
 
     try:
-        data = json.loads(res_video.stdout)
-        streams = data.get("streams", [])
+
+        data = json.loads(
+            res_video.stdout
+        )
+
+        streams = data.get(
+            "streams",
+            []
+        )
 
         if not streams:
+
             raise RuntimeError(
-                "QC Échec : aucune piste vidéo détectée."
+                "QC Échec : aucune piste "
+                "vidéo détectée."
             )
 
-        width = int(streams[0].get("width", 0))
-        height = int(streams[0].get("height", 0))
+        width = int(
+            streams[0].get(
+                "width",
+                0
+            )
+        )
+
+        height = int(
+            streams[0].get(
+                "height",
+                0
+            )
+        )
 
         if width <= 0 or height <= 0:
+
             raise RuntimeError(
                 "QC Échec : résolution vidéo invalide."
             )
 
-    except (ValueError, TypeError, json.JSONDecodeError):
+        if expected_format == "portrait":
+
+            if height <= width:
+
+                raise RuntimeError(
+                    "QC Échec : le Short final "
+                    "n'est pas au format vertical."
+                )
+
+        elif expected_format == "landscape":
+
+            if width <= height:
+
+                raise RuntimeError(
+                    "QC Échec : la vidéo longue "
+                    "n'est pas au format horizontal."
+                )
+
+    except (
+        ValueError,
+        TypeError,
+        json.JSONDecodeError
+    ):
+
         raise RuntimeError(
-            "QC Échec : impossible de vérifier la résolution."
+            "QC Échec : impossible de vérifier "
+            "la résolution."
         )
 
-    # Vérification audio
+    # --------------------------------------------------------
+    # AUDIO
+    # --------------------------------------------------------
+
     cmd_audio = [
         FFPROBE_BIN,
         "-v",
@@ -306,58 +470,62 @@ def qc_validate_video(video_path: Path):
         str(video_path)
     ]
 
-    res_audio = run_command(cmd_audio)
+    res_audio = run_command(
+        cmd_audio
+    )
 
     if "audio" not in res_audio.stdout.lower():
+
         raise RuntimeError(
-            "QC Échec : la vidéo générée ne contient pas de piste audio."
+            "QC Échec : aucune piste audio détectée."
         )
+
+    return duration
 
 
 # ============================================================
 # TEXTE / TTS
 # ============================================================
 
-def fix_phonetics_for_tts(text: str) -> str:
+def fix_phonetics_for_tts(
+    text: str
+) -> str:
 
-    replacements = {
-        r"\bbugges\b": "beugues",
-        r"\bbugge\b": "beugue",
-        r"\bbug\b": "beugue",
-        r"\bbugger\b": "beuguer",
-        r"\bbuggué\b": "beugué",
-    }
+    """
+    Ne transforme volontairement pas 'buguer'.
 
-    cleaned = text
+    Le CTA doit rester prononcé naturellement par
+    Edge-TTS et ne doit surtout pas être transformé
+    artificiellement en 'beuguer'.
+    """
 
-    for pattern, repl in replacements.items():
-        cleaned = re.sub(
-            pattern,
-            repl,
-            cleaned,
-            flags=re.IGNORECASE
-        )
-
-    return cleaned
+    return text
 
 
-def generate_tts(text: str, output_path: Path):
+def generate_tts(
+    text: str,
+    output_path: Path
+):
 
-    spoken_text = fix_phonetics_for_tts(text)
+    spoken_text = fix_phonetics_for_tts(
+        text
+    )
 
     cmd = [
         "edge-tts",
         "--voice",
         TTS_VOICE,
         "--rate",
-        "+5%",
+        TTS_RATE,
         "--text",
         spoken_text,
         "--write-media",
         str(output_path)
     ]
 
-    run_command(cmd)
+    run_command(
+        cmd
+    )
 
 
 # ============================================================
@@ -365,143 +533,271 @@ def generate_tts(text: str, output_path: Path):
 # ============================================================
 
 SYSTEM_PROMPT = f"""
-Tu es le réalisateur et scénariste de la chaîne YouTube/TikTok
-'Cerveau Curieux'.
+Tu es le réalisateur et scénariste de la chaîne
+YouTube/TikTok 'Cerveau Curieux'.
 
 OBJECTIF :
-Créer des vidéos courtes, modernes, dynamiques et documentées
-sur le cerveau, la psychologie, les sciences et les comportements humains.
+Créer des vidéos courtes, modernes, dynamiques,
+documentées et réellement intéressantes sur le cerveau,
+la psychologie, les sciences et les comportements humains.
 
-IDENTITÉ DE MARQUE :
+============================================================
+IDENTITÉ DE MARQUE
+============================================================
 
 La première scène DOIT commencer exactement par :
+
 "{INTRO_SIGNATURE}"
 
 Cette phrase est la signature sonore de Cerveau Curieux.
-Elle doit rester reconnaissable dans toutes les vidéos.
 
-IMPORTANT :
-Après "{INTRO_SIGNATURE}", enchaîne immédiatement avec un hook
-lié au sujet.
+Après cette phrase, enchaîne immédiatement avec
+un hook fort lié au sujet.
 
-NE PAS mettre de présentation longue.
-NE PAS dire "bienvenue sur la chaîne".
-NE PAS commencer par une question générique sans intérêt.
+Ne fais PAS de présentation longue.
 
-STRUCTURE DU DÉBUT :
+Ne dis PAS :
+"Bienvenue sur la chaîne."
 
-"{INTRO_SIGNATURE}" + hook très rapide + information intrigante.
+Ne perds PAS plusieurs secondes à expliquer ce que
+va faire la vidéo.
 
-STYLE :
+============================================================
+STYLE
+============================================================
 
 - Tutoiement.
 - Ton moderne, jeune, urbain et naturel.
+- Le texte doit sonner comme une vraie personne qui parle.
 - Expressions possibles : "frérot", "ça rend ouf",
-  "une dinguerie", "le cerveau il...", "ton cerveau vient de..."
+  "une dinguerie", "ton cerveau il..."
 - Aucune insulte.
 - Aucune vulgarité.
 - Pas de langage artificiellement jeune.
-- Le texte doit sonner comme quelqu'un qui parle réellement.
+- Pas de phrases inutiles.
 
-RIGUEUR :
+============================================================
+RIGUEUR SCIENTIFIQUE
+============================================================
 
 - Ne jamais inventer un fait.
 - Ne jamais présenter une hypothèse comme une certitude.
-- Ne jamais promettre un résultat que la science ne garantit pas.
-- Si une explication scientifique comporte une nuance importante,
-  l'exprimer simplement.
-- Pas de fake facts pour obtenir des vues.
+- Ne jamais utiliser un faux chiffre.
+- Ne jamais inventer une expérience scientifique.
+- Si une nuance scientifique est importante,
+  l'expliquer simplement.
+- Le contenu doit rester fidèle aux connaissances
+  scientifiques disponibles.
 
-SCÈNES :
+============================================================
+DURÉE DES SHORTS
+============================================================
 
-- Une seule phrase courte par scène.
-- Environ 1 à 3 secondes par scène.
-- Adapter la longueur à la voix naturelle.
-- Les scènes doivent s'enchaîner rapidement.
-- Chaque scène doit apporter une information ou faire progresser
-  l'histoire.
-- Éviter les répétitions.
+IMPORTANT :
 
-FIN :
+Pour short_single et short_twoparts, le script principal
+doit viser environ 130 à 155 mots.
 
-La dernière scène DOIT utiliser exactement cette signature :
+Objectif idéal :
+140 à 155 mots.
+
+Minimum acceptable :
+130 mots.
+
+Maximum normal :
+165 mots.
+
+La narration doit naturellement produire environ
+45 à 60 secondes avec une voix française normale.
+
+NE JAMAIS ajouter des phrases uniquement pour atteindre
+un nombre de mots ou une durée.
+
+Chaque phrase doit avoir une fonction réelle :
+
+- apporter un fait,
+- expliquer un mécanisme,
+- donner un exemple,
+- montrer une conséquence,
+- apporter une nuance,
+- créer une transition utile,
+- ou faire progresser le raisonnement.
+
+INTERDIT :
+
+"Et c'est vraiment incroyable."
+"Mais attends, c'est fou."
+"Tu vas halluciner."
+"Et voilà pourquoi c'est dingue."
+
+si ces phrases n'apportent aucune information.
+
+Si le sujet permet d'expliquer davantage, utilise cette place
+pour apporter de vraies informations.
+
+============================================================
+STRUCTURE D'UN SHORT
+============================================================
+
+Structure recommandée :
+
+1. Signature :
+"{INTRO_SIGNATURE}"
+
+2. Hook immédiat.
+
+3. Présentation rapide du phénomène.
+
+4. Explication du mécanisme.
+
+5. Exemple concret du quotidien.
+
+6. Conséquence ou détail surprenant.
+
+7. Petite nuance scientifique si nécessaire.
+
+8. Conclusion.
+
+9. CTA exact.
+
+Le contenu doit rester fluide et naturel.
+
+============================================================
+SCÈNES
+============================================================
+
+Une scène contient une seule phrase.
+
+Les scènes doivent être courtes pour permettre un montage
+dynamique.
+
+Cependant, ne découpe PAS artificiellement une phrase
+pour créer davantage de scènes.
+
+Chaque scène doit correspondre à une vraie unité de narration.
+
+============================================================
+FIN
+============================================================
+
+La dernière scène DOIT être exactement :
 
 "{CTA_SIGNATURE}"
 
-Ne pas remplacer cette phrase par un CTA générique.
+Ne modifie aucun mot de cette phrase.
 
-TITRE :
+============================================================
+TITRE
+============================================================
 
-Créer un titre qui donne immédiatement envie de regarder.
+Créer un titre très accrocheur mais honnête.
 
 Le titre doit :
+
 - créer une vraie curiosité,
-- rester directement lié au sujet,
-- être compréhensible en une seconde,
+- être directement lié au sujet,
+- être compréhensible immédiatement,
 - éviter le clickbait mensonger,
-- ne pas inventer d'information,
+- ne rien promettre que la vidéo ne démontre pas,
 - éviter "Vous ne croirez jamais...",
 - éviter "INCROYABLE !!!",
 - éviter les majuscules excessives,
-- faire idéalement moins de 65 caractères.
+- rester sous 65 caractères.
 
-Privilégier des structures comme :
-- "Pourquoi ton cerveau fait ça sans que tu le remarques"
-- "Ton cerveau fait ça pour une raison surprenante"
-- "Pourquoi tu oublies ça dès que tu changes de pièce"
-- "Le détail qui piège ton cerveau"
-- "Pourquoi ton cerveau réagit comme ça"
-
-Adapter évidemment le titre au sujet réel.
-
-HASHTAGS :
+============================================================
+HASHTAGS
+============================================================
 
 Donner 4 à 6 hashtags.
 
 Priorité :
+
 1. sujet précis,
-2. science / psychologie si pertinent,
-3. cerveau si pertinent,
-4. comportement humain si pertinent.
+2. science,
+3. psychologie,
+4. cerveau,
+5. comportement humain.
 
 Éviter les hashtags génériques inutiles.
 
-VISUELS :
+============================================================
+VISUELS PEXELS
+============================================================
 
-Chaque visual_query doit être en anglais,
-2 à 4 mots maximum,
-et décrire une action physique concrète.
+IMPORTANT :
+
+Les visuels seront recherchés sur Pexels sous forme
+de VRAIES VIDÉOS.
+
+Chaque visual_query doit donc décrire une scène physique
+qui peut exister sous forme de clip vidéo.
+
+Utiliser uniquement :
+
+- 2 à 4 mots,
+- en anglais,
+- action concrète,
+- sujet visuel facilement trouvable sur Pexels.
 
 Exemples :
+
 "person opening door"
 "confused man thinking"
 "woman checking phone"
 "brain scan closeup"
+"student studying desk"
+"person forgetting keys"
+"man looking confused"
 
-FORMAT :
+Éviter les concepts abstraits impossibles à rechercher.
+
+============================================================
+FORMAT
+============================================================
 
 Choisir entre :
+
 short_single
 short_twoparts
 long_plus_teaser
 
-Pour les Shorts, privilégier short_single sauf si le sujet
-nécessite réellement deux parties.
+Pour un sujet normal de Short, privilégier :
 
-PREMIÈRE SCÈNE :
-Elle commence obligatoirement par "{INTRO_SIGNATURE}".
+short_single
 
-DERNIÈRE SCÈNE :
-Elle doit contenir la signature CTA exacte.
+Utiliser short_twoparts uniquement si le sujet
+gagne réellement à être séparé en deux parties.
+
+Pour long_plus_teaser, le script principal doit être
+nettement plus long et documenté.
+
+============================================================
+RÈGLE ABSOLUE
+============================================================
+
+NE REMPLIS JAMAIS LA DURÉE AVEC DU BLABLA.
+
+Une vidéo plus longue doit être plus riche,
+pas simplement plus bavarde.
 """
 
 
-def normalize_hashtags(hashtags: List[str]) -> List[str]:
+# ============================================================
+# NORMALISATION DES HASHTAGS
+# ============================================================
+
+def normalize_hashtags(
+    hashtags: List[str]
+) -> List[str]:
 
     clean = []
 
     for tag in hashtags or []:
-        if not isinstance(tag, str):
+
+        if not isinstance(
+            tag,
+            str
+        ):
             continue
 
         tag = tag.strip()
@@ -512,99 +808,234 @@ def normalize_hashtags(hashtags: List[str]) -> List[str]:
         if not tag.startswith("#"):
             tag = "#" + tag
 
-        tag = re.sub(r"[^\w#]", "", tag)
+        tag = re.sub(
+            r"[^\w#]",
+            "",
+            tag
+        )
 
         if len(tag) < 2:
             continue
 
-        if tag.lower() not in [x.lower() for x in clean]:
+        if tag.lower() not in [
+            x.lower()
+            for x in clean
+        ]:
+
             clean.append(tag)
 
     return clean[:6]
 
 
-def validate_and_repair_script(data: Dict) -> Dict:
+# ============================================================
+# VALIDATION DU SCRIPT
+# ============================================================
 
-    if not isinstance(data, dict):
-        raise RuntimeError("Réponse Gemini invalide.")
+def normalize_scene(
+    scene
+) -> Optional[Dict]:
 
-    scenes = data.get("script_principal") or []
+    if hasattr(
+        scene,
+        "model_dump"
+    ):
+
+        scene = scene.model_dump()
+
+    if not isinstance(
+        scene,
+        dict
+    ):
+
+        return None
+
+    text = str(
+        scene.get(
+            "text",
+            ""
+        )
+    ).strip()
+
+    emotion = str(
+        scene.get(
+            "emotion",
+            "default"
+        )
+    ).strip().lower()
+
+    visual_query = str(
+        scene.get(
+            "visual_query",
+            "person thinking"
+        )
+    ).strip()
+
+    if not text:
+        return None
+
+    allowed_emotions = set(
+        MASCOT_FILES.keys()
+    )
+
+    if emotion not in allowed_emotions:
+        emotion = "default"
+
+    visual_query = clean_pexels_query(
+        visual_query
+    )
+
+    if not visual_query:
+        visual_query = "person thinking"
+
+    return {
+        "text": text,
+        "emotion": emotion,
+        "visual_query": visual_query[:80]
+    }
+
+
+def validate_and_repair_script(
+    data: Dict
+) -> Dict:
+
+    if not isinstance(
+        data,
+        dict
+    ):
+
+        raise RuntimeError(
+            "Réponse Gemini invalide."
+        )
+
+    scenes = data.get(
+        "script_principal"
+    ) or []
 
     if not scenes:
-        raise RuntimeError("Gemini n'a généré aucune scène.")
 
-    # Conversion en dictionnaires simples
+        raise RuntimeError(
+            "Gemini n'a généré aucune scène."
+        )
+
     normalized = []
 
     for scene in scenes:
 
-        if hasattr(scene, "model_dump"):
-            scene = scene.model_dump()
+        clean_scene = normalize_scene(
+            scene
+        )
 
-        if not isinstance(scene, dict):
-            continue
-
-        text = str(scene.get("text", "")).strip()
-        emotion = str(scene.get("emotion", "default")).strip().lower()
-        visual_query = str(
-            scene.get("visual_query", "brain science")
-        ).strip()
-
-        if not text:
-            continue
-
-        allowed_emotions = set(MASCOT_FILES.keys())
-
-        if emotion not in allowed_emotions:
-            emotion = "default"
-
-        normalized.append({
-            "text": text,
-            "emotion": emotion,
-            "visual_query": visual_query[:80]
-        })
+        if clean_scene:
+            normalized.append(
+                clean_scene
+            )
 
     if not normalized:
-        raise RuntimeError("Le script Gemini est vide après validation.")
 
-    # Verrouillage de l'identité de début
+        raise RuntimeError(
+            "Le script Gemini est vide "
+            "après validation."
+        )
+
+    # --------------------------------------------------------
+    # INTRO
+    # --------------------------------------------------------
+
     first_text = normalized[0]["text"]
 
     if not first_text.lower().startswith(
         INTRO_SIGNATURE.lower()
     ):
+
         normalized[0]["text"] = (
-            INTRO_SIGNATURE + ". " + first_text
+            INTRO_SIGNATURE
+            + ". "
+            + first_text
         )
 
-    # Verrouillage du CTA final
+    # --------------------------------------------------------
+    # CTA
+    # --------------------------------------------------------
+
     normalized[-1]["text"] = CTA_SIGNATURE
     normalized[-1]["emotion"] = "happy"
-    normalized[-1]["visual_query"] = "smiling person thumbs up"
+    normalized[-1]["visual_query"] = (
+        "smiling person thumbs up"
+    )
 
     data["script_principal"] = normalized
 
-    # Nettoyage du titre
+    # --------------------------------------------------------
+    # SCRIPT TEASER
+    # --------------------------------------------------------
+
+    teaser = data.get(
+        "script_teaser"
+    ) or []
+
+    normalized_teaser = []
+
+    for scene in teaser:
+
+        clean_scene = normalize_scene(
+            scene
+        )
+
+        if clean_scene:
+            normalized_teaser.append(
+                clean_scene
+            )
+
+    data["script_teaser"] = (
+        normalized_teaser
+    )
+
+    # --------------------------------------------------------
+    # TITRE
+    # --------------------------------------------------------
+
     title = str(
-        data.get("title", "Pourquoi ton cerveau fait ça")
+        data.get(
+            "title",
+            "Pourquoi ton cerveau fait ça"
+        )
     ).strip()
 
-    title = re.sub(r"\s+", " ", title)
-    title = title.strip("\"'")
+    title = re.sub(
+        r"\s+",
+        " ",
+        title
+    )
+
+    title = title.strip(
+        "\"'"
+    )
 
     if len(title) > 65:
+
         title = title[:65].rstrip()
 
     if not title:
-        title = "Pourquoi ton cerveau fait ça"
+
+        title = (
+            "Pourquoi ton cerveau fait ça"
+        )
 
     data["title"] = title
 
+    # --------------------------------------------------------
+    # HASHTAGS
+    # --------------------------------------------------------
+
     data["hashtags"] = normalize_hashtags(
-        data.get("hashtags", [])
+        data.get(
+            "hashtags",
+            []
+        )
     )
 
     if not data["hashtags"]:
+
         data["hashtags"] = [
             "#Cerveau",
             "#Psychologie",
@@ -615,51 +1046,263 @@ def validate_and_repair_script(data: Dict) -> Dict:
     return data
 
 
+# ============================================================
+# APPEL GEMINI
+# ============================================================
+
+def call_gemini_script(
+    client,
+    contents: str
+) -> Dict:
+
+    response = client.models.generate_content(
+        model="gemini-3.6-flash",
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            response_schema=ScriptOutput,
+            temperature=0.75,
+        ),
+    )
+
+    parsed = None
+
+    if (
+        hasattr(
+            response,
+            "parsed"
+        )
+        and response.parsed
+    ):
+
+        parsed = response.parsed.model_dump()
+
+    if parsed is None:
+
+        parsed = json.loads(
+            response.text
+        )
+
+    return validate_and_repair_script(
+        parsed
+    )
+
+
+# ============================================================
+# RÉPARATION D'UN SHORT TROP COURT
+# ============================================================
+
+def expand_short_script(
+    client,
+    topic: str,
+    data: Dict,
+    status_cb
+) -> Dict:
+
+    scenes = data.get(
+        "script_principal",
+        []
+    )
+
+    word_count = count_words_in_scenes(
+        scenes
+    )
+
+    if word_count >= SHORT_MIN_WORDS:
+
+        return data
+
+    status_cb(
+        "🧠 Script trop court : "
+        "ajout d'informations utiles..."
+    )
+
+    current_script = "\n".join(
+        scene.get(
+            "text",
+            ""
+        )
+        for scene in scenes
+    )
+
+    repair_prompt = f"""
+Le sujet de la vidéo est :
+
+{topic.strip()}
+
+Voici le script actuel :
+
+{current_script}
+
+Ce script est trop court.
+
+Il contient environ {word_count} mots.
+
+Tu dois le réécrire pour atteindre environ
+{SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots.
+
+IMPORTANT :
+
+N'ajoute absolument aucune phrase de remplissage.
+
+Chaque nouvelle phrase doit apporter une information
+réelle et utile au sujet.
+
+Tu peux notamment ajouter :
+
+- une explication du mécanisme,
+- un exemple concret,
+- une conséquence,
+- une nuance scientifique,
+- une comparaison utile,
+- une information complémentaire directement liée.
+
+Ne répète pas les mêmes informations.
+
+Conserve le hook et le ton naturel.
+
+La première scène doit commencer exactement par :
+
+"{INTRO_SIGNATURE}"
+
+La dernière scène doit être exactement :
+
+"{CTA_SIGNATURE}"
+
+Le résultat final doit être naturel à l'oral,
+dynamique et adapté à une vidéo de 45 à 60 secondes.
+
+Renvoie le script complet dans le format JSON demandé.
+"""
+
+    repaired = call_gemini_script(
+        client,
+        repair_prompt
+    )
+
+    repaired = validate_and_repair_script(
+        repaired
+    )
+
+    final_words = count_words_in_scenes(
+        repaired.get(
+            "script_principal",
+            []
+        )
+    )
+
+    if final_words < SHORT_MIN_WORDS:
+
+        raise RuntimeError(
+            "Gemini a produit un Short encore "
+            "trop court après la seconde génération."
+        )
+
+    return repaired
+
+
+# ============================================================
+# GÉNÉRATION DU SCRIPT
+# ============================================================
+
 def generate_script_gemini(
     topic: str,
     status_cb
 ) -> Dict:
 
     if not GEMINI_API_KEY:
+
         raise RuntimeError(
             "Clé API GEMINI manquante."
         )
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    client = genai.Client(
+        api_key=GEMINI_API_KEY
+    )
 
     status_cb(
-        "🧠 Analyse du sujet et rédaction du script..."
+        "🧠 Analyse du sujet et rédaction "
+        "du script..."
     )
 
     try:
 
-        response = client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=(
-                "Sujet à traiter :\n"
-                f"{topic.strip()}\n\n"
-                "Crée le contenu complet en respectant strictement "
-                "l'identité Cerveau Curieux."
-            ),
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                response_schema=ScriptOutput,
-                temperature=0.75,
-            ),
+        prompt = f"""
+Sujet à traiter :
+
+{topic.strip()}
+
+Crée le contenu complet de la vidéo.
+
+IMPORTANT POUR UN SHORT :
+
+Si tu choisis short_single ou short_twoparts,
+produis environ {SHORT_TARGET_MIN_WORDS} à
+{SHORT_TARGET_MAX_WORDS} mots de narration
+dans script_principal.
+
+Minimum absolu :
+{SHORT_MIN_WORDS} mots.
+
+La durée visée est de 45 à 60 secondes.
+
+Ne remplis jamais artificiellement la durée.
+
+Utilise uniquement des informations utiles,
+des explications, exemples, mécanismes,
+conséquences et nuances pertinentes.
+
+La première scène doit commencer exactement par :
+
+"{INTRO_SIGNATURE}"
+
+La dernière scène doit être exactement :
+
+"{CTA_SIGNATURE}"
+"""
+
+        data = call_gemini_script(
+            client,
+            prompt
         )
 
-        parsed = None
+        format_choisi = data.get(
+            "format_choisi",
+            "short_single"
+        )
 
-        if hasattr(response, "parsed") and response.parsed:
-            parsed = response.parsed.model_dump()
+        # ----------------------------------------------------
+        # RÉPARATION SI SHORT TROP COURT
+        # ----------------------------------------------------
 
-        if parsed is None:
-            parsed = json.loads(response.text)
+        if format_choisi in (
+            "short_single",
+            "short_twoparts"
+        ):
 
-        return validate_and_repair_script(parsed)
+            word_count = count_words_in_scenes(
+                data.get(
+                    "script_principal",
+                    []
+                )
+            )
+
+            if word_count < SHORT_MIN_WORDS:
+
+                data = expand_short_script(
+                    client,
+                    topic,
+                    data,
+                    status_cb
+                )
+
+        return validate_and_repair_script(
+            data
+        )
 
     except Exception as e:
+
         raise RuntimeError(
             f"Erreur Gemini : {e}"
         )
@@ -669,7 +1312,9 @@ def generate_script_gemini(
 # PEXELS
 # ============================================================
 
-def clean_pexels_query(query: str) -> str:
+def clean_pexels_query(
+    query: str
+) -> str:
 
     query = re.sub(
         r"[^a-zA-Z\s]",
@@ -678,11 +1323,14 @@ def clean_pexels_query(query: str) -> str:
     )
 
     words = [
-        w for w in query.split()
+        w
+        for w in query.split()
         if len(w) > 2
     ]
 
-    return " ".join(words[:4])
+    return " ".join(
+        words[:4]
+    )
 
 
 def search_pexels_video(
@@ -693,12 +1341,16 @@ def search_pexels_video(
     if not PEXELS_API_KEY:
         return None
 
-    clean_query = clean_pexels_query(query)
+    clean_query = clean_pexels_query(
+        query
+    )
 
     if not clean_query:
         clean_query = "human thinking"
 
-    url = "https://api.pexels.com/videos/search"
+    url = (
+        "https://api.pexels.com/videos/search"
+    )
 
     params = {
         "query": clean_query,
@@ -722,46 +1374,69 @@ def search_pexels_video(
         if r.status_code != 200:
             return None
 
-        videos = r.json().get("videos", [])
+        videos = r.json().get(
+            "videos",
+            []
+        )
 
         candidates = []
 
         for video in videos:
 
             files = [
-                f for f in video.get("video_files", [])
+                f
+                for f in video.get(
+                    "video_files",
+                    []
+                )
                 if ".mp4" in str(
-                    f.get("link", "")
+                    f.get(
+                        "link",
+                        ""
+                    )
                 ).lower()
             ]
 
             for file_info in files:
 
                 width = int(
-                    file_info.get("width", 0) or 0
+                    file_info.get(
+                        "width",
+                        0
+                    ) or 0
                 )
 
                 height = int(
-                    file_info.get("height", 0) or 0
+                    file_info.get(
+                        "height",
+                        0
+                    ) or 0
                 )
 
-                link = file_info.get("link")
+                link = file_info.get(
+                    "link"
+                )
 
                 if not link:
                     continue
 
-                # Éviter les vidéos trop petites
                 if orientation == "portrait":
+
                     if height < 720:
                         continue
+
                 else:
+
                     if width < 1280:
                         continue
 
                 score = width * height
 
                 candidates.append(
-                    (score, link)
+                    (
+                        score,
+                        link
+                    )
                 )
 
         if not candidates:
@@ -772,13 +1447,19 @@ def search_pexels_video(
             reverse=True
         )
 
-        # Prendre parmi les meilleurs pour éviter
-        # d'avoir toujours exactement le même type de fichier.
-        top = candidates[:min(5, len(candidates))]
+        top = candidates[
+            :min(
+                5,
+                len(candidates)
+            )
+        ]
 
-        return random.choice(top)[1]
+        return random.choice(
+            top
+        )[1]
 
     except Exception:
+
         return None
 
 
@@ -792,12 +1473,15 @@ def download_file(
         with requests.get(
             url,
             stream=True,
-            timeout=20
+            timeout=30
         ) as r:
 
             r.raise_for_status()
 
-            with open(dest, "wb") as f:
+            with open(
+                dest,
+                "wb"
+            ) as f:
 
                 for chunk in r.iter_content(
                     chunk_size=64 * 1024
@@ -812,6 +1496,7 @@ def download_file(
         )
 
     except Exception:
+
         return False
 
 
@@ -819,23 +1504,39 @@ def download_file(
 # SOUS-TITRES ASS
 # ============================================================
 
-def ass_time(seconds: float) -> str:
+def ass_time(
+    seconds: float
+) -> str:
 
-    seconds = max(0.0, seconds)
+    seconds = max(
+        0.0,
+        seconds
+    )
 
-    hours = int(seconds // 3600)
+    hours = int(
+        seconds // 3600
+    )
+
     minutes = int(
         (seconds % 3600) // 60
     )
 
-    secs = int(seconds % 60)
+    secs = int(
+        seconds % 60
+    )
+
     centiseconds = int(
-        (seconds - int(seconds)) * 100
+        (
+            seconds
+            - int(seconds)
+        ) * 100
     )
 
     return (
-        f"{hours}:{minutes:02d}:"
-        f"{secs:02d}.{centiseconds:02d}"
+        f"{hours}:"
+        f"{minutes:02d}:"
+        f"{secs:02d}."
+        f"{centiseconds:02d}"
     )
 
 
@@ -847,9 +1548,12 @@ def create_ass_subtitles(
 ):
 
     if width == 1080:
+
         font_size = 58
         margin_v = 300
+
     else:
+
         font_size = 40
         margin_v = 75
 
@@ -868,32 +1572,52 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     lines = []
+
     current_time = 0.0
 
     for scene in scenes:
 
         scene_duration = float(
-            scene.get("duration", 0)
+            scene.get(
+                "duration",
+                0
+            )
         )
 
         text = (
-            str(scene.get("text", ""))
-            .replace("\n", " ")
-            .replace("{", "")
-            .replace("}", "")
+            str(
+                scene.get(
+                    "text",
+                    ""
+                )
+            )
+            .replace(
+                "\n",
+                " "
+            )
+            .replace(
+                "{",
+                ""
+            )
+            .replace(
+                "}",
+                ""
+            )
             .strip()
         )
 
         words = text.split()
 
         if not words:
+
             current_time += scene_duration
             continue
 
-        # Pour les Shorts, petits groupes.
-        # Cela conserve l'effet karaoké sans afficher
-        # des blocs énormes.
-        chunk_size = 4 if width == 1080 else 5
+        chunk_size = (
+            4
+            if width == 1080
+            else 5
+        )
 
         chunks = [
             words[i:i + chunk_size]
@@ -905,14 +1629,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         ]
 
         chunk_duration = (
-            scene_duration / len(chunks)
+            scene_duration
+            / len(chunks)
         )
 
-        for idx_chunk, chunk_words in enumerate(chunks):
+        for idx_chunk, chunk_words in enumerate(
+            chunks
+        ):
 
             chunk_start = (
                 current_time
-                + idx_chunk * chunk_duration
+                + idx_chunk
+                * chunk_duration
             )
 
             word_duration = (
@@ -926,27 +1654,51 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
                 start_t = (
                     chunk_start
-                    + idx_word * word_duration
+                    + idx_word
+                    * word_duration
                 )
 
-                end_t = start_t + word_duration
+                end_t = (
+                    start_t
+                    + word_duration
+                )
 
                 formatted_words = []
 
-                for k, w in enumerate(chunk_words):
+                for k, w in enumerate(
+                    chunk_words
+                ):
 
-                    safe_word = w.replace(
-                        ",", ""
+                    safe_word = (
+                        w
+                        .replace(
+                            ",",
+                            ""
+                        )
+                        .replace(
+                            ".",
+                            ""
+                        )
+                        .replace(
+                            "?",
+                            ""
+                        )
+                        .replace(
+                            "!",
+                            ""
+                        )
                     )
 
                     if k == idx_word:
-                        # Jaune vif pour le mot actif
+
                         formatted_words.append(
                             "{\\c&H00FFFF&}"
                             + safe_word
                             + "{\\c&HFFFFFF&}"
                         )
+
                     else:
+
                         formatted_words.append(
                             safe_word
                         )
@@ -995,7 +1747,7 @@ def process_scene_audio(
 
     trimmed_audio = (
         work_dir
-        / f"audio_{idx:03d}.mp3"
+        / f"audio_{idx:03d}.wav"
     )
 
     generate_tts(
@@ -1003,14 +1755,17 @@ def process_scene_audio(
         temp_audio
     )
 
-    # On garde les effets sonores ponctuels.
-    # Pas de whoosh sur absolument chaque phrase.
-    is_first = idx == 0
-    is_last = idx == total_scenes - 1
+    is_last = (
+        idx == total_scenes - 1
+    )
 
     sfx_to_use = None
 
-    if is_last and CLICK_SFX_FILE.exists():
+    if (
+        is_last
+        and CLICK_SFX_FILE.exists()
+    ):
+
         sfx_to_use = CLICK_SFX_FILE
 
     elif (
@@ -1018,6 +1773,7 @@ def process_scene_audio(
         and idx % 3 == 0
         and SFX_FILE.exists()
     ):
+
         sfx_to_use = SFX_FILE
 
     if sfx_to_use:
@@ -1060,6 +1816,8 @@ def process_scene_audio(
             "48000",
             "-ac",
             "2",
+            "-c:a",
+            "pcm_s16le",
             str(trimmed_audio)
         ]
 
@@ -1092,6 +1850,8 @@ def process_scene_audio(
             "48000",
             "-ac",
             "2",
+            "-c:a",
+            "pcm_s16le",
             str(trimmed_audio)
         ]
 
@@ -1113,7 +1873,8 @@ def concatenate_audio(
 ) -> Path:
 
     concat_file = (
-        work_dir / "concat_audio.txt"
+        work_dir
+        / "concat_audio.txt"
     )
 
     with open(
@@ -1123,15 +1884,16 @@ def concatenate_audio(
     ) as f:
 
         for audio in audio_clips:
+
             f.write(
                 f"file '{audio.name}'\n"
             )
 
     raw_audio = (
-        work_dir / "raw_audio.wav"
+        work_dir
+        / "raw_audio.wav"
     )
 
-    # WAV intermédiaire plus robuste
     run_command(
         [
             FFMPEG_BIN,
@@ -1162,14 +1924,31 @@ def add_background_music(
 ) -> Path:
 
     output = (
-        work_dir / "full_audio.m4a"
+        work_dir
+        / "full_audio.m4a"
     )
 
     if not BGM_FILE.exists():
-        shutil.copy(
-            voice_audio,
-            output
+
+        run_command(
+            [
+                FFMPEG_BIN,
+                "-y",
+                "-i",
+                str(voice_audio),
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-ar",
+                "48000",
+                "-ac",
+                "2",
+                str(output)
+            ],
+            cwd=work_dir
         )
+
         return output
 
     cmd = [
@@ -1223,69 +2002,175 @@ def add_background_music(
 # VIDÉO
 # ============================================================
 
-def split_video_in_two(
-    input_video: Path,
-    total_duration: float,
-    out_dir: Path
-) -> Tuple[Path, Path]:
+def create_video_clip_from_pexels(
+    visual_file: Path,
+    mascot_img: Path,
+    output_clip: Path,
+    duration: float,
+    width: int,
+    height: int,
+    mascot_scale: int,
+    pos_x: str,
+    pos_y: str,
+    enable_expr: str,
+    work_dir: Path
+):
 
-    mid_point = total_duration / 2.0
+    fps = 30
 
-    part1 = (
-        out_dir
-        / f"{input_video.stem}_Part1.mp4"
+    # --------------------------------------------------------
+    # IMPORTANT
+    # --------------------------------------------------------
+    # Ici on utilise réellement le CLIP VIDÉO Pexels.
+    # Aucun passage en image fixe.
+    #
+    # On recadre simplement le clip à la résolution voulue.
+    # Le mouvement original de la vidéo Pexels est conservé.
+    # --------------------------------------------------------
+
+    base_filter = (
+        f"[0:v]"
+        f"scale={width}:{height}:"
+        "force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},"
+        f"fps={fps},"
+        "setsar=1"
+        "[bg]"
     )
 
-    part2 = (
-        out_dir
-        / f"{input_video.stem}_Part2.mp4"
+    filter_complex = (
+        f"{base_filter};"
+        f"[1:v]"
+        f"scale={mascot_scale}:-1,"
+        "format=rgba"
+        "[mascot];"
+        f"[bg][mascot]"
+        f"overlay=x={pos_x}:y={pos_y}:"
+        f"enable='{enable_expr}'"
+        "[v_out]"
     )
+
+    cmd = [
+        FFMPEG_BIN,
+        "-y",
+        "-stream_loop",
+        "-1",
+        "-i",
+        str(visual_file),
+        "-loop",
+        "1",
+        "-i",
+        str(mascot_img.resolve()),
+        "-t",
+        str(duration),
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        "[v_out]",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        str(fps),
+        "-movflags",
+        "+faststart",
+        str(output_clip)
+    ]
 
     run_command(
-        [
-            FFMPEG_BIN,
-            "-y",
-            "-i",
-            str(input_video),
-            "-t",
-            str(mid_point),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "20",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            str(part1)
-        ]
+        cmd,
+        cwd=work_dir
     )
+
+
+def create_fallback_video_clip(
+    output_clip: Path,
+    mascot_img: Path,
+    duration: float,
+    width: int,
+    height: int,
+    mascot_scale: int,
+    pos_x: str,
+    pos_y: str,
+    enable_expr: str,
+    work_dir: Path
+):
+
+    fallback = (
+        work_dir
+        / f"fallback_{output_clip.stem}.png"
+    )
+
+    Image.new(
+        "RGB",
+        (width, height),
+        color=(20, 20, 35)
+    ).save(
+        fallback
+    )
+
+    fps = 30
+
+    filter_complex = (
+        f"[0:v]"
+        "scale="
+        f"{width}:{height},"
+        f"fps={fps},"
+        "setsar=1"
+        "[bg];"
+        f"[1:v]"
+        f"scale={mascot_scale}:-1,"
+        "format=rgba"
+        "[mascot];"
+        f"[bg][mascot]"
+        f"overlay=x={pos_x}:y={pos_y}:"
+        f"enable='{enable_expr}'"
+        "[v_out]"
+    )
+
+    cmd = [
+        FFMPEG_BIN,
+        "-y",
+        "-loop",
+        "1",
+        "-i",
+        str(fallback),
+        "-loop",
+        "1",
+        "-i",
+        str(mascot_img.resolve()),
+        "-t",
+        str(duration),
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        "[v_out]",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        str(fps),
+        "-movflags",
+        "+faststart",
+        str(output_clip)
+    ]
 
     run_command(
-        [
-            FFMPEG_BIN,
-            "-y",
-            "-ss",
-            str(mid_point),
-            "-i",
-            str(input_video),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "20",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            str(part2)
-        ]
+        cmd,
+        cwd=work_dir
     )
-
-    return part1, part2
 
 
 def generate_video_pipeline(
@@ -1295,13 +2180,15 @@ def generate_video_pipeline(
 ) -> Path:
 
     if not script_scenes:
+
         raise ValueError(
             "Le script est vide."
         )
 
     work_dir = (
         TEMP_DIR
-        / f"run_{int(time.time())}_{video_format}"
+        / f"run_{int(time.time())}_"
+        f"{video_format}_{random.randint(1000, 9999)}"
     )
 
     work_dir.mkdir(
@@ -1330,7 +2217,10 @@ def generate_video_pipeline(
     )
 
     audio_clips = []
-    total_scenes = len(script_scenes)
+
+    total_scenes = len(
+        script_scenes
+    )
 
     for idx, scene in enumerate(
         script_scenes
@@ -1357,19 +2247,45 @@ def generate_video_pipeline(
         work_dir
     )
 
+    voice_duration = get_media_duration(
+        full_audio
+    )
+
     # --------------------------------------------------------
-    # VIDÉOS
+    # CONTRÔLE DURÉE SHORT
+    # --------------------------------------------------------
+
+    if video_format == "portrait":
+
+        if voice_duration < SHORT_MIN_DURATION:
+
+            raise RuntimeError(
+                "Le script audio est encore trop court "
+                f"({voice_duration:.1f} s). "
+                "La génération est arrêtée pour éviter "
+                "de fabriquer artificiellement du remplissage."
+            )
+
+        if voice_duration > SHORT_MAX_DURATION:
+
+            raise RuntimeError(
+                "Le Short dépasse 60 secondes "
+                f"({voice_duration:.1f} s). "
+                "Le script doit être raccourci."
+            )
+
+    # --------------------------------------------------------
+    # VIDÉOS PEXELS
     # --------------------------------------------------------
 
     status_cb(
-        "🎥 Recherche et montage des visuels..."
+        "🎥 Recherche des clips vidéo Pexels..."
     )
 
     video_clips = []
 
-    fps = 30
-
     if video_format == "portrait":
+
         mascot_scale = int(
             width * 0.19
         )
@@ -1397,7 +2313,10 @@ def generate_video_pipeline(
     ):
 
         duration = float(
-            scene.get("duration", 1.0)
+            scene.get(
+                "duration",
+                1.0
+            )
         )
 
         duration = max(
@@ -1416,13 +2335,20 @@ def generate_video_pipeline(
         )
 
         if not mascot_img.exists():
-            mascot_img = MASCOT_FILES["default"]
 
-        # Recherche Pexels
+            mascot_img = (
+                MASCOT_FILES["default"]
+            )
+
+        status_cb(
+            f"🎬 Clip {idx + 1}/{total_scenes} : "
+            f"{scene.get('visual_query', '')}"
+        )
+
         url = search_pexels_video(
             scene.get(
                 "visual_query",
-                "brain science"
+                "person thinking"
             ),
             orientation
         )
@@ -1437,13 +2363,12 @@ def generate_video_pipeline(
             / f"clip_{idx:03d}.mp4"
         )
 
-        # Position variable mais contrôlée
         pos_x, pos_y = mascot_positions[
-            idx % len(mascot_positions)
+            idx % len(
+                mascot_positions
+            )
         ]
 
-        # La mascotte ne doit pas être présente
-        # sur une durée énorme.
         mascot_duration = min(
             2.5,
             duration
@@ -1453,126 +2378,45 @@ def generate_video_pipeline(
             f"between(t,0,{mascot_duration})"
         )
 
-        if url and download_file(
-            url,
-            visual_file
+        if (
+            url
+            and download_file(
+                url,
+                visual_file
+            )
         ):
 
-            # Zoom progressif très léger.
-            # L'objectif est d'éviter l'effet diaporama.
-            base_filter = (
-                f"[0:v]"
-                f"scale={width}:{height}:"
-                "force_original_aspect_ratio=increase,"
-                f"crop={width}:{height},"
-                "zoompan="
-                "z='min(zoom+0.0008,1.08)':"
-                f"d={max(1, int(duration * fps))}:"
-                "x='iw/2-(iw/zoom/2)':"
-                "y='ih/2-(ih/zoom/2)':"
-                f"s={width}x{height}:"
-                f"fps={fps}"
-                "[bg]"
+            # VRAIE VIDÉO PEXELS
+            create_video_clip_from_pexels(
+                visual_file=visual_file,
+                mascot_img=mascot_img,
+                output_clip=output_clip,
+                duration=duration,
+                width=width,
+                height=height,
+                mascot_scale=mascot_scale,
+                pos_x=pos_x,
+                pos_y=pos_y,
+                enable_expr=enable_expr,
+                work_dir=work_dir
             )
-
-            cmd = [
-                FFMPEG_BIN,
-                "-y",
-                "-stream_loop",
-                "-1",
-                "-i",
-                str(visual_file),
-                "-loop",
-                "1",
-                "-i",
-                str(mascot_img.resolve())
-            ]
 
         else:
 
-            fallback = (
-                work_dir
-                / f"fallback_{idx:03d}.png"
+            # Fallback uniquement si Pexels
+            # ne renvoie aucun clip exploitable.
+            create_fallback_video_clip(
+                output_clip=output_clip,
+                mascot_img=mascot_img,
+                duration=duration,
+                width=width,
+                height=height,
+                mascot_scale=mascot_scale,
+                pos_x=pos_x,
+                pos_y=pos_y,
+                enable_expr=enable_expr,
+                work_dir=work_dir
             )
-
-            # Fond neutre uniquement en dernier recours.
-            Image.new(
-                "RGB",
-                (width, height),
-                color=(20, 20, 35)
-            ).save(fallback)
-
-            frames = max(
-                1,
-                int(duration * fps)
-            )
-
-            base_filter = (
-                f"[0:v]"
-                "zoompan="
-                "z='min(zoom+0.0025,1.12)':"
-                f"d={frames}:"
-                "x='iw/2-(iw/zoom/2)':"
-                "y='ih/2-(ih/zoom/2)':"
-                f"s={width}x{height}:"
-                f"fps={fps}"
-                "[bg]"
-            )
-
-            cmd = [
-                FFMPEG_BIN,
-                "-y",
-                "-loop",
-                "1",
-                "-i",
-                str(fallback),
-                "-loop",
-                "1",
-                "-i",
-                str(mascot_img.resolve())
-            ]
-
-        filter_complex = (
-            f"{base_filter};"
-            f"[1:v]"
-            f"scale={mascot_scale}:-1,"
-            "format=rgba"
-            "[mascot];"
-            f"[bg][mascot]"
-            f"overlay=x={pos_x}:y={pos_y}:"
-            f"enable='{enable_expr}'"
-            "[v_out]"
-        )
-
-        cmd.extend(
-            [
-                "-t",
-                str(duration),
-                "-filter_complex",
-                filter_complex,
-                "-map",
-                "[v_out]",
-                "-an",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-crf",
-                "20",
-                "-pix_fmt",
-                "yuv420p",
-                "-r",
-                str(fps),
-                "-movflags",
-                "+faststart",
-                str(output_clip)
-            ]
-        )
-
-        run_command(
-            cmd,
-            cwd=work_dir
-        )
 
         video_clips.append(
             output_clip
@@ -1583,11 +2427,12 @@ def generate_video_pipeline(
     # --------------------------------------------------------
 
     status_cb(
-        "⚡ Fusion des scènes..."
+        "⚡ Fusion des scènes vidéo..."
     )
 
     raw_video = (
-        work_dir / "raw_video.mp4"
+        work_dir
+        / "raw_video.mp4"
     )
 
     if len(video_clips) == 1:
@@ -1611,6 +2456,7 @@ def generate_video_pipeline(
         ) as f:
 
             for video in video_clips:
+
                 f.write(
                     f"file '{video.name}'\n"
                 )
@@ -1641,7 +2487,8 @@ def generate_video_pipeline(
     )
 
     subtitles_file = (
-        work_dir / "subtitles.ass"
+        work_dir
+        / "subtitles.ass"
     )
 
     create_ass_subtitles(
@@ -1660,14 +2507,13 @@ def generate_video_pipeline(
     )
 
     watermark_x = 35
+
     watermark_y = (
         55
         if video_format == "portrait"
         else 35
     )
 
-    # Pas d'emoji dans drawtext, car certains serveurs
-    # FFmpeg n'ont pas la police adéquate.
     vf_filter = (
         "subtitles=subtitles.ass,"
         "drawtext="
@@ -1717,7 +2563,9 @@ def generate_video_pipeline(
         "-shortest",
         "-movflags",
         "+faststart",
-        str(final_output.resolve())
+        str(
+            final_output.resolve()
+        )
     ]
 
     run_command(
@@ -1733,11 +2581,116 @@ def generate_video_pipeline(
         "🔍 Contrôle qualité final..."
     )
 
-    qc_validate_video(
-        final_output
+    final_duration = qc_validate_video(
+        final_output,
+        expected_format=(
+            "portrait"
+            if video_format == "portrait"
+            else "landscape"
+        )
     )
 
+    # --------------------------------------------------------
+    # CONTRÔLE FINAL SHORT
+    # --------------------------------------------------------
+
+    if video_format == "portrait":
+
+        if final_duration < SHORT_MIN_DURATION:
+
+            raise RuntimeError(
+                "QC Échec : le Short final fait "
+                f"{final_duration:.1f} secondes. "
+                "Minimum demandé : 45 secondes."
+            )
+
+        if final_duration > SHORT_MAX_DURATION:
+
+            raise RuntimeError(
+                "QC Échec : le Short final fait "
+                f"{final_duration:.1f} secondes. "
+                "Maximum demandé : 60 secondes."
+            )
+
     return final_output
+
+
+# ============================================================
+# DÉCOUPAGE EN DEUX PARTIES
+# ============================================================
+
+def split_video_in_two(
+    input_video: Path,
+    total_duration: float,
+    out_dir: Path
+) -> Tuple[Path, Path]:
+
+    mid_point = (
+        total_duration / 2.0
+    )
+
+    part1 = (
+        out_dir
+        / f"{input_video.stem}_Part1.mp4"
+    )
+
+    part2 = (
+        out_dir
+        / f"{input_video.stem}_Part2.mp4"
+    )
+
+    run_command(
+        [
+            FFMPEG_BIN,
+            "-y",
+            "-i",
+            str(input_video),
+            "-t",
+            str(mid_point),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            str(part1)
+        ]
+    )
+
+    run_command(
+        [
+            FFMPEG_BIN,
+            "-y",
+            "-ss",
+            str(mid_point),
+            "-i",
+            str(input_video),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            str(part2)
+        ]
+    )
+
+    return (
+        part1,
+        part2
+    )
 
 
 # ============================================================
@@ -1821,9 +2774,9 @@ def main():
         unsafe_allow_html=True
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # SIDEBAR
-    # --------------------------------------------------------
+    # ========================================================
 
     with st.sidebar:
 
@@ -1834,10 +2787,16 @@ def main():
             unsafe_allow_html=True
         )
 
-        if MASCOT_FILES["default"].exists():
+        if MASCOT_FILES[
+            "default"
+        ].exists():
 
             st.image(
-                str(MASCOT_FILES["default"]),
+                str(
+                    MASCOT_FILES[
+                        "default"
+                    ]
+                ),
                 use_container_width=True
             )
 
@@ -1848,7 +2807,8 @@ def main():
         )
 
         st.write(
-            "Pipeline Gemini + Edge-TTS + Pexels + FFmpeg."
+            "Pipeline Gemini + Edge-TTS + "
+            "Pexels Video + FFmpeg."
         )
 
         st.markdown("---")
@@ -1861,9 +2821,13 @@ def main():
             "CTA : signature Cerveau Curieux"
         )
 
-    # --------------------------------------------------------
+        st.caption(
+            "Short : 45 à 60 secondes"
+        )
+
+    # ========================================================
     # HEADER
-    # --------------------------------------------------------
+    # ========================================================
 
     st.markdown(
         '<div class="main-title">'
@@ -1881,9 +2845,9 @@ def main():
 
     cleanup_old_temp_dirs()
 
-    # --------------------------------------------------------
+    # ========================================================
     # SUJET
-    # --------------------------------------------------------
+    # ========================================================
 
     st.markdown(
         "### 📝 Quel est ton sujet aujourd'hui ?"
@@ -1907,7 +2871,8 @@ def main():
         if not topic.strip():
 
             st.warning(
-                "⚠️ Oups ! Tu as oublié d'écrire un sujet."
+                "⚠️ Oups ! Tu as oublié "
+                "d'écrire un sujet."
             )
 
             return
@@ -1922,9 +2887,9 @@ def main():
                 def update_status(msg):
                     st.write(msg)
 
-                # -------------------------------
+                # --------------------------------------------
                 # SCRIPT
-                # -------------------------------
+                # --------------------------------------------
 
                 ai_data = generate_script_gemini(
                     topic,
@@ -1941,14 +2906,25 @@ def main():
                     "Pourquoi ton cerveau fait ça"
                 )
 
+                word_count = count_words_in_scenes(
+                    ai_data.get(
+                        "script_principal",
+                        []
+                    )
+                )
+
                 st.write(
                     "✅ Format défini : "
                     f"**{format_choisi.replace('_', ' ').title()}**"
                 )
 
-                # -------------------------------
+                st.write(
+                    f"📝 Narration : **{word_count} mots**"
+                )
+
+                # --------------------------------------------
                 # VIDÉO
-                # -------------------------------
+                # --------------------------------------------
 
                 if format_choisi == "short_single":
 
@@ -1977,7 +2953,8 @@ def main():
                     )
 
                     update_status(
-                        "✂️ Découpage de la vidéo en 2 parties..."
+                        "✂️ Découpage de la vidéo "
+                        "en 2 parties..."
                     )
 
                     total_duration = (
@@ -2012,12 +2989,20 @@ def main():
                         )
                     )
 
+                    teaser_scenes = ai_data.get(
+                        "script_teaser",
+                        []
+                    )
+
+                    if not teaser_scenes:
+
+                        raise RuntimeError(
+                            "Le teaser est vide."
+                        )
+
                     short_path = (
                         generate_video_pipeline(
-                            ai_data.get(
-                                "script_teaser",
-                                []
-                            ),
+                            teaser_scenes,
                             "portrait",
                             update_status
                         )
@@ -2031,12 +3016,14 @@ def main():
                 else:
 
                     raise RuntimeError(
-                        f"Format inconnu : {format_choisi}"
+                        f"Format inconnu : "
+                        f"{format_choisi}"
                     )
 
                 status_box.update(
                     label=(
-                        "🎉 Production terminée avec succès !"
+                        "🎉 Production terminée "
+                        "avec succès !"
                     ),
                     state="complete",
                     expanded=False
@@ -2046,7 +3033,8 @@ def main():
 
                 status_box.update(
                     label=(
-                        "❌ Oups, une erreur s'est produite."
+                        "❌ Oups, une erreur "
+                        "s'est produite."
                     ),
                     state="error",
                     expanded=True
@@ -2058,9 +3046,9 @@ def main():
 
                 return
 
-        # ----------------------------------------------------
+        # ====================================================
         # RÉSULTATS
-        # ----------------------------------------------------
+        # ====================================================
 
         st.markdown("---")
 
@@ -2075,9 +3063,9 @@ def main():
             ]
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # INFORMATIONS
-        # ----------------------------------------------------
+        # ====================================================
 
         with info_tab:
 
@@ -2096,8 +3084,9 @@ def main():
             )
 
             st.caption(
-                "Titre optimisé pour créer de la curiosité "
-                "sans inventer de promesse."
+                "Le script est conçu pour atteindre "
+                "la durée cible avec du contenu utile, "
+                "sans phrases de remplissage."
             )
 
             st.markdown("---")
@@ -2125,24 +3114,41 @@ def main():
                     language="text"
                 )
 
-        # ----------------------------------------------------
+        # ====================================================
         # VIDÉOS
-        # ----------------------------------------------------
+        # ====================================================
 
         with video_tab:
 
             if format_choisi == "short_single":
 
+                final_duration = (
+                    get_media_duration(
+                        video_path
+                    )
+                )
+
+                st.success(
+                    f"Durée finale : "
+                    f"**{final_duration:.1f} secondes**"
+                )
+
                 st.video(
                     str(video_path)
                 )
 
+                with open(
+                    video_path,
+                    "rb"
+                ) as video_file:
+
+                    video_bytes = (
+                        video_file.read()
+                    )
+
                 st.download_button(
                     "⬇️ Télécharger la vidéo",
-                    data=open(
-                        video_path,
-                        "rb"
-                    ).read(),
+                    data=video_bytes,
                     file_name=video_path.name,
                     mime="video/mp4"
                 )
@@ -2158,7 +3164,23 @@ def main():
                     )
 
                     st.video(
-                        str(video_path[0])
+                        str(
+                            video_path[0]
+                        )
+                    )
+
+                    with open(
+                        video_path[0],
+                        "rb"
+                    ) as f:
+
+                        part1_bytes = f.read()
+
+                    st.download_button(
+                        "⬇️ Partie 1",
+                        data=part1_bytes,
+                        file_name=video_path[0].name,
+                        mime="video/mp4"
                     )
 
                 with col2:
@@ -2168,7 +3190,23 @@ def main():
                     )
 
                     st.video(
-                        str(video_path[1])
+                        str(
+                            video_path[1]
+                        )
+                    )
+
+                    with open(
+                        video_path[1],
+                        "rb"
+                    ) as f:
+
+                        part2_bytes = f.read()
+
+                    st.download_button(
+                        "⬇️ Partie 2",
+                        data=part2_bytes,
+                        file_name=video_path[1].name,
+                        mime="video/mp4"
                     )
 
             elif format_choisi == "long_plus_teaser":
@@ -2177,8 +3215,35 @@ def main():
                     "📺 Format Long (16:9)"
                 )
 
+                long_duration = (
+                    get_media_duration(
+                        video_path[0]
+                    )
+                )
+
+                st.caption(
+                    f"Durée : "
+                    f"{long_duration:.1f} secondes"
+                )
+
                 st.video(
-                    str(video_path[0])
+                    str(
+                        video_path[0]
+                    )
+                )
+
+                with open(
+                    video_path[0],
+                    "rb"
+                ) as f:
+
+                    long_bytes = f.read()
+
+                st.download_button(
+                    "⬇️ Télécharger la vidéo longue",
+                    data=long_bytes,
+                    file_name=video_path[0].name,
+                    mime="video/mp4"
                 )
 
                 st.divider()
@@ -2187,8 +3252,35 @@ def main():
                     "📱 Teaser Short (9:16)"
                 )
 
+                teaser_duration = (
+                    get_media_duration(
+                        video_path[1]
+                    )
+                )
+
+                st.caption(
+                    f"Durée : "
+                    f"{teaser_duration:.1f} secondes"
+                )
+
                 st.video(
-                    str(video_path[1])
+                    str(
+                        video_path[1]
+                    )
+                )
+
+                with open(
+                    video_path[1],
+                    "rb"
+                ) as f:
+
+                    teaser_bytes = f.read()
+
+                st.download_button(
+                    "⬇️ Télécharger le teaser",
+                    data=teaser_bytes,
+                    file_name=video_path[1].name,
+                    mime="video/mp4"
                 )
 
         st.balloons()
