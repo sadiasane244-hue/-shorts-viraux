@@ -34,23 +34,22 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # CLÉS API
 # ============================================================
 
-PEXELS_API_KEY = (
-    os.environ.get("PEXELS_API_KEY")
-    or (
-        st.secrets.get("PEXELS_API_KEY", "")
-        if hasattr(st, "secrets")
-        else ""
-    )
-)
+def get_secret(name: str) -> str:
+    value = os.environ.get(name, "")
 
-GEMINI_API_KEY = (
-    os.environ.get("GEMINI_API_KEY")
-    or (
-        st.secrets.get("GEMINI_API_KEY", "")
-        if hasattr(st, "secrets")
-        else ""
-    )
-)
+    if value:
+        return value
+
+    try:
+        value = st.secrets.get(name, "")
+    except Exception:
+        value = ""
+
+    return value or ""
+
+
+PEXELS_API_KEY = get_secret("PEXELS_API_KEY")
+GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
 
 
 # ============================================================
@@ -82,37 +81,31 @@ CTA_SIGNATURE = (
 
 
 # ============================================================
-# OBJECTIFS DE DURÉE SHORT
+# DURÉE DES SHORTS
 # ============================================================
 
-# Durée absolue autorisée
-SHORT_MIN_DURATION = 45.0
-SHORT_MAX_DURATION = 60.0
+# IMPORTANT :
+# Le Short doit faire PLUS de 45 secondes.
+# Il n'y a plus de limite stricte à 60 secondes.
+#
+# 90 secondes = limite de sécurité.
+#
+# On vise volontairement une zone confortable entre
+# environ 50 et 75 secondes, sans jamais remplir artificiellement.
 
-# Zone idéale recherchée par le pré-test TTS
-SHORT_PREVIEW_MIN_DURATION = 45.5
-SHORT_PREVIEW_TARGET_MIN = 47.0
-SHORT_PREVIEW_TARGET_MAX = 58.0
+SHORT_MIN_DURATION = 45.1
+SHORT_TARGET_MIN_DURATION = 50.0
+SHORT_TARGET_MAX_DURATION = 75.0
+SHORT_MAX_DURATION = 90.0
 
-# Le nombre de mots est volontairement plus élevé qu'avant.
-#
-# Ancien réglage :
-# 140 mots -> environ 39 secondes dans votre capture.
-#
-# Nouveau réglage :
-# 165 à 180 mots -> beaucoup plus de chances d'obtenir
-# une vraie durée de 45 à 60 secondes avec HenriNeural +5%.
-#
-# La durée réelle TTS reste prioritaire sur le simple
-# nombre de mots.
-SHORT_MIN_WORDS = 160
-SHORT_TARGET_MIN_WORDS = 165
+SHORT_MIN_WORDS = 135
+SHORT_TARGET_MIN_WORDS = 150
 SHORT_TARGET_MAX_WORDS = 180
-SHORT_MAX_WORDS = 190
+SHORT_MAX_WORDS = 200
 
 
 # ============================================================
-# AUDIO OPTIONNEL
+# FICHIERS AUDIO OPTIONNELS
 # ============================================================
 
 SFX_FILE = next(
@@ -175,10 +168,23 @@ if not MASCOT_FILES["default"].exists():
 
 
 # ============================================================
-# SCHÉMA JSON
+# EXCEPTIONS SPÉCIALES
+# ============================================================
+
+class ShortTooShortError(RuntimeError):
+    pass
+
+
+class ShortTooLongError(RuntimeError):
+    pass
+
+
+# ============================================================
+# SCHÉMA JSON GEMINI
 # ============================================================
 
 class Scene(BaseModel):
+
     text: str = Field(
         description=(
             "Une seule phrase courte de narration. "
@@ -197,12 +203,14 @@ class Scene(BaseModel):
     visual_query: str = Field(
         description=(
             "Mots-clés visuels en anglais, 2 à 4 mots, "
-            "décrivant une action physique concrète."
+            "décrivant une action physique concrète "
+            "facile à trouver sous forme de vidéo Pexels."
         )
     )
 
 
 class ScriptOutput(BaseModel):
+
     format_choisi: str = Field(
         description=(
             "Choix parmi: short_single, short_twoparts, "
@@ -227,11 +235,8 @@ class ScriptOutput(BaseModel):
 
     script_principal: List[Scene] = Field(
         description=(
-            "Scènes principales de la vidéo. "
-            "Pour un Short, viser environ 165 à 180 mots. "
-            "La première scène commence obligatoirement "
-            "par 'Wesh l'équipe'. "
-            "La dernière scène est exactement le CTA demandé."
+            "Scènes principales. Pour un Short, viser "
+            "150 à 180 mots réellement informatifs."
         )
     )
 
@@ -252,7 +257,12 @@ def cleanup_old_temp_dirs(max_age_hours=2):
 
     now = time.time()
 
-    for item in TEMP_DIR.iterdir():
+    try:
+        items = list(TEMP_DIR.iterdir())
+    except Exception:
+        return
+
+    for item in items:
 
         if not item.is_dir():
             continue
@@ -298,7 +308,7 @@ def run_command(
         raise RuntimeError(
             "Erreur Shell:\n"
             f"Commande: {' '.join(cmd_str)}\n"
-            f"Erreur: {e.stderr[-2000:]}"
+            f"Erreur: {e.stderr[-3000:]}"
         )
 
 
@@ -357,6 +367,31 @@ def count_words_in_scenes(
 
     return total
 
+
+def get_script_text(
+    scenes: List[Dict]
+) -> str:
+
+    return " ".join(
+        str(
+            scene.get(
+                "text",
+                ""
+            )
+        ).strip()
+        for scene in scenes or []
+        if str(
+            scene.get(
+                "text",
+                ""
+            )
+        ).strip()
+    )
+
+
+# ============================================================
+# QC VIDÉO
+# ============================================================
 
 def qc_validate_video(
     video_path: Path,
@@ -507,24 +542,16 @@ def qc_validate_video(
 
 
 # ============================================================
-# TEXTE / TTS
+# TTS
 # ============================================================
 
 def fix_phonetics_for_tts(
     text: str
 ) -> str:
 
-    """
-    IMPORTANT :
-
-    Le mot 'buguer' est volontairement conservé.
-
-    Nous ne le transformons plus en 'beuguer', car cette
-    transformation modifiait la prononciation recherchée
-    et pouvait rendre le CTA moins naturel.
-
-    Le texte affiché et le texte TTS restent donc identiques.
-    """
+    # IMPORTANT :
+    # On ne remplace plus "buguer" par "beuguer".
+    # Le CTA affiché et prononcé reste fidèle au texte demandé.
 
     return text
 
@@ -556,16 +583,16 @@ def generate_tts(
 
 
 # ============================================================
-# GEMINI
+# PROMPT GEMINI
 # ============================================================
 
 SYSTEM_PROMPT = f"""
 Tu es le réalisateur et scénariste de la chaîne
-YouTube/TikTok 'Cerveau Curieux'.
+YouTube/TikTok "Cerveau Curieux".
 
 OBJECTIF :
-Créer des vidéos courtes, modernes, dynamiques,
-documentées et réellement intéressantes sur le cerveau,
+Créer des vidéos modernes, dynamiques, documentées
+et réellement intéressantes sur le cerveau,
 la psychologie, les sciences et les comportements humains.
 
 ============================================================
@@ -576,8 +603,6 @@ La première scène DOIT commencer exactement par :
 
 "{INTRO_SIGNATURE}"
 
-Cette phrase est la signature sonore de Cerveau Curieux.
-
 Après cette phrase, enchaîne immédiatement avec
 un hook fort lié au sujet.
 
@@ -586,205 +611,150 @@ Ne fais PAS de présentation longue.
 Ne dis PAS :
 "Bienvenue sur la chaîne."
 
-Ne perds PAS plusieurs secondes à expliquer ce que
-va faire la vidéo.
-
 ============================================================
 STYLE
 ============================================================
 
 - Tutoiement.
-- Ton moderne, jeune, urbain et naturel.
-- Le texte doit sonner comme une vraie personne qui parle.
-- Expressions possibles : "frérot", "ça rend ouf",
-  "une dinguerie", "ton cerveau il..."
-- Aucune insulte.
-- Aucune vulgarité.
+- Ton moderne, jeune, naturel.
+- Le texte doit sonner comme une vraie personne.
+- Expressions naturelles possibles :
+  "frérot", "ton cerveau", "ça paraît bizarre", etc.
+- Pas d'insulte.
+- Pas de vulgarité.
 - Pas de langage artificiellement jeune.
-- Pas de phrases inutiles.
+- Aucune phrase inutile.
 
 ============================================================
 RIGUEUR SCIENTIFIQUE
 ============================================================
 
 - Ne jamais inventer un fait.
+- Ne jamais inventer une expérience.
+- Ne jamais inventer un chiffre.
 - Ne jamais présenter une hypothèse comme une certitude.
-- Ne jamais utiliser un faux chiffre.
-- Ne jamais inventer une expérience scientifique.
-- Si une nuance scientifique est importante,
-  l'expliquer simplement.
-- Le contenu doit rester fidèle aux connaissances
-  scientifiques disponibles.
+- Expliquer simplement les nuances importantes.
 
 ============================================================
 DURÉE DES SHORTS
 ============================================================
 
-Pour short_single et short_twoparts :
+ATTENTION :
 
-Le script principal doit viser environ :
+Le Short doit durer PLUS DE 45 secondes.
 
-165 à 180 mots.
+Il n'est PAS limité à 60 secondes.
 
-Minimum absolu :
+Une durée allant jusqu'à 90 secondes est autorisée.
 
-160 mots.
+ZONE IDÉALE :
+environ 50 à 75 secondes.
 
-Maximum normal :
+Le script doit généralement contenir
+environ 150 à 180 mots.
 
-190 mots.
+Il peut aller jusqu'à environ 200 mots si le sujet
+nécessite réellement plus d'explications.
 
-IMPORTANT :
+NE JAMAIS remplir la durée artificiellement.
 
-Le nombre de mots n'est qu'une cible.
+Chaque phrase doit apporter une vraie information :
 
-La durée réelle de la voix Edge-TTS est prioritaire.
-
-La narration doit naturellement produire
-environ 45 à 60 secondes.
-
-NE JAMAIS ralentir artificiellement la voix.
-
-NE JAMAIS ajouter de silence.
-
-NE JAMAIS répéter une phrase.
-
-NE JAMAIS écrire des phrases uniquement
-pour atteindre un nombre de mots.
-
-Chaque phrase doit avoir une fonction réelle :
-
-- apporter un fait,
-- expliquer un mécanisme,
-- donner un exemple,
-- montrer une conséquence,
-- apporter une nuance,
-- créer une transition utile,
-- ou faire progresser le raisonnement.
+- fait,
+- mécanisme,
+- exemple,
+- conséquence,
+- nuance,
+- explication,
+- comparaison utile,
+- transition nécessaire.
 
 INTERDIT :
 
-"Et c'est vraiment incroyable."
-
+"Et c'est incroyable."
 "Mais attends, c'est fou."
-
 "Tu vas halluciner."
-
-"Et voilà pourquoi c'est dingue."
 
 si ces phrases n'apportent aucune information.
 
 Si le sujet permet d'expliquer davantage,
-utilise cette place pour apporter de vraies informations.
+utilise cette place pour apporter du contenu utile.
 
 ============================================================
-STRUCTURE D'UN SHORT
+STRUCTURE SHORT
 ============================================================
 
-Structure recommandée :
-
-1. Signature :
-"{INTRO_SIGNATURE}"
-
-2. Hook immédiat.
-
-3. Présentation rapide du phénomène.
-
-4. Explication du mécanisme.
-
-5. Exemple concret du quotidien.
-
-6. Conséquence ou détail surprenant.
-
-7. Petite nuance scientifique si nécessaire.
-
-8. Conclusion.
-
-9. CTA exact.
-
-Le contenu doit rester fluide et naturel.
+1. Signature.
+2. Hook.
+3. Présentation du phénomène.
+4. Explication.
+5. Exemple concret.
+6. Détail surprenant.
+7. Conséquence.
+8. Nuance scientifique si nécessaire.
+9. Conclusion.
+10. CTA.
 
 ============================================================
 SCÈNES
 ============================================================
 
-Une scène contient une seule phrase.
+Une scène = une unité naturelle de narration.
 
-Les scènes doivent être courtes pour permettre
-un montage dynamique.
+Les scènes doivent être suffisamment courtes
+pour permettre un montage dynamique.
 
-Cependant :
-
-NE DÉCOUPE PAS artificiellement une phrase
-uniquement pour créer davantage de scènes.
-
-Chaque scène doit correspondre à une vraie
-unité de narration.
-
-Vise environ 18 à 28 scènes pour un Short.
+Ne découpe PAS artificiellement une phrase
+simplement pour augmenter le nombre de scènes.
 
 ============================================================
-FIN
+CTA
 ============================================================
 
 La dernière scène DOIT être exactement :
 
 "{CTA_SIGNATURE}"
 
-Ne modifie aucun mot de cette phrase.
+Ne modifie aucun mot.
 
 ============================================================
 TITRE
 ============================================================
 
-Créer un titre très accrocheur mais honnête.
+Maximum 65 caractères.
 
-Le titre doit :
+Accrocheur mais honnête.
 
-- créer une vraie curiosité,
-- être directement lié au sujet,
-- être compréhensible immédiatement,
-- éviter le clickbait mensonger,
-- ne rien promettre que la vidéo ne démontre pas,
-- éviter "Vous ne croirez jamais...",
-- éviter "INCROYABLE !!!",
-- éviter les majuscules excessives,
-- rester sous 65 caractères.
+Directement lié au sujet.
+
+Pas de clickbait mensonger.
 
 ============================================================
 HASHTAGS
 ============================================================
 
-Donner 4 à 6 hashtags.
+4 à 6 hashtags ciblés.
 
 Priorité :
 
-1. sujet précis,
-2. science,
-3. psychologie,
-4. cerveau,
-5. comportement humain.
-
-Éviter les hashtags génériques inutiles.
+- sujet précis,
+- science,
+- psychologie,
+- cerveau,
+- comportement humain.
 
 ============================================================
-VISUELS PEXELS
+PEXELS
 ============================================================
 
-IMPORTANT :
+Les visuels seront de VRAIES VIDÉOS Pexels.
 
-Les visuels seront recherchés sur Pexels sous forme
-de VRAIES VIDÉOS.
+Chaque visual_query doit être :
 
-Chaque visual_query doit donc décrire une scène physique
-qui peut exister sous forme de clip vidéo.
-
-Utiliser uniquement :
-
-- 2 à 4 mots,
 - en anglais,
-- action concrète,
-- sujet visuel facilement trouvable sur Pexels.
+- 2 à 4 mots,
+- concret,
+- facile à rechercher en vidéo.
 
 Exemples :
 
@@ -794,47 +764,20 @@ Exemples :
 "brain scan closeup"
 "student studying desk"
 "person forgetting keys"
-"man looking confused"
 
-Éviter les concepts abstraits impossibles à rechercher.
-
-============================================================
-FORMAT
-============================================================
-
-Choisir entre :
-
-short_single
-short_twoparts
-long_plus_teaser
-
-Pour un sujet normal de Short, privilégier :
-
-short_single
-
-Utiliser short_twoparts uniquement si le sujet
-gagne réellement à être séparé en deux parties.
-
-Pour long_plus_teaser, le script principal doit être
-nettement plus long et documenté.
+Éviter les concepts abstraits.
 
 ============================================================
 RÈGLE ABSOLUE
 ============================================================
 
-NE REMPLIS JAMAIS LA DURÉE AVEC DU BLABLA.
-
 Une vidéo plus longue doit être plus riche,
 pas simplement plus bavarde.
-
-Si une réparation est demandée parce que la durée
-audio est trop courte, ajoute uniquement des
-informations réellement pertinentes au sujet.
 """
 
 
 # ============================================================
-# NORMALISATION DES HASHTAGS
+# HASHTAGS
 # ============================================================
 
 def normalize_hashtags(
@@ -879,7 +822,32 @@ def normalize_hashtags(
 
 
 # ============================================================
-# NORMALISATION D'UNE SCÈNE
+# PEXELS QUERY
+# ============================================================
+
+def clean_pexels_query(
+    query: str
+) -> str:
+
+    query = re.sub(
+        r"[^a-zA-Z\s]",
+        "",
+        query or ""
+    )
+
+    words = [
+        w
+        for w in query.split()
+        if len(w) > 2
+    ]
+
+    return " ".join(
+        words[:4]
+    )
+
+
+# ============================================================
+# NORMALISATION SCÈNES
 # ============================================================
 
 def normalize_scene(
@@ -929,7 +897,6 @@ def normalize_scene(
     )
 
     if emotion not in allowed_emotions:
-
         emotion = "default"
 
     visual_query = clean_pexels_query(
@@ -937,7 +904,6 @@ def normalize_scene(
     )
 
     if not visual_query:
-
         visual_query = "person thinking"
 
     return {
@@ -948,7 +914,7 @@ def normalize_scene(
 
 
 # ============================================================
-# VALIDATION ET RÉPARATION DU SCRIPT
+# VALIDATION SCRIPT
 # ============================================================
 
 def validate_and_repair_script(
@@ -983,7 +949,6 @@ def validate_and_repair_script(
         )
 
         if clean_scene:
-
             normalized.append(
                 clean_scene
             )
@@ -991,8 +956,7 @@ def validate_and_repair_script(
     if not normalized:
 
         raise RuntimeError(
-            "Le script Gemini est vide "
-            "après validation."
+            "Le script Gemini est vide."
         )
 
     # --------------------------------------------------------
@@ -1024,7 +988,7 @@ def validate_and_repair_script(
     data["script_principal"] = normalized
 
     # --------------------------------------------------------
-    # SCRIPT TEASER
+    # TEASER
     # --------------------------------------------------------
 
     teaser = data.get(
@@ -1040,14 +1004,27 @@ def validate_and_repair_script(
         )
 
         if clean_scene:
-
             normalized_teaser.append(
                 clean_scene
             )
 
-    data["script_teaser"] = (
-        normalized_teaser
-    )
+    data["script_teaser"] = normalized_teaser
+
+    # --------------------------------------------------------
+    # FORMAT
+    # --------------------------------------------------------
+
+    allowed_formats = {
+        "short_single",
+        "short_twoparts",
+        "long_plus_teaser"
+    }
+
+    if data.get(
+        "format_choisi"
+    ) not in allowed_formats:
+
+        data["format_choisi"] = "short_single"
 
     # --------------------------------------------------------
     # TITRE
@@ -1102,20 +1079,6 @@ def validate_and_repair_script(
             "#CerveauCurieux"
         ]
 
-    # --------------------------------------------------------
-    # FORMAT
-    # --------------------------------------------------------
-
-    allowed_formats = {
-        "short_single",
-        "short_twoparts",
-        "long_plus_teaser"
-    }
-
-    if data.get("format_choisi") not in allowed_formats:
-
-        data["format_choisi"] = "short_single"
-
     return data
 
 
@@ -1163,14 +1126,15 @@ def call_gemini_script(
 
 
 # ============================================================
-# RÉPARATION D'UN SHORT TROP COURT EN MOTS
+# RÉPARATION PAR NOMBRE DE MOTS
 # ============================================================
 
-def expand_short_script(
+def repair_script_by_words(
     client,
     topic: str,
     data: Dict,
-    status_cb
+    status_cb,
+    too_short: bool
 ) -> Dict:
 
     scenes = data.get(
@@ -1182,15 +1146,6 @@ def expand_short_script(
         scenes
     )
 
-    if word_count >= SHORT_MIN_WORDS:
-
-        return data
-
-    status_cb(
-        "🧠 Script trop court : "
-        "ajout d'informations utiles..."
-    )
-
     current_script = "\n".join(
         scene.get(
             "text",
@@ -1199,538 +1154,104 @@ def expand_short_script(
         for scene in scenes
     )
 
-    repair_prompt = f"""
-Le sujet de la vidéo est :
+    if too_short:
+
+        instruction = f"""
+Le script est trop court.
+
+Il contient actuellement environ {word_count} mots.
+
+Réécris-le pour atteindre environ
+{SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots.
+
+Ajoute uniquement des informations utiles :
+
+- mécanisme scientifique,
+- exemple concret,
+- conséquence,
+- détail intéressant,
+- nuance scientifique,
+- explication supplémentaire.
+
+Aucune phrase de remplissage.
+Aucune répétition.
+"""
+
+    else:
+
+        instruction = f"""
+Le script est trop long.
+
+Il contient actuellement environ {word_count} mots.
+
+Réduis-le vers environ
+{SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots.
+
+Supprime uniquement les répétitions,
+digressions et formulations inutiles.
+
+Conserve les informations importantes.
+Ne supprime pas les explications essentielles.
+"""
+
+    prompt = f"""
+Le sujet est :
 
 {topic.strip()}
-
-Format actuel :
-
-{data.get("format_choisi", "short_single")}
 
 Voici le script actuel :
 
 {current_script}
 
-Le script contient environ {word_count} mots.
+{instruction}
 
-Il est trop court pour une narration de 45 à 60 secondes.
+Le résultat doit rester naturel à l'oral.
 
-Réécris le script complet pour atteindre environ
-{SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots.
-
-IMPORTANT :
-
-N'ajoute absolument aucune phrase de remplissage.
-
-Chaque ajout doit apporter une information réelle.
-
-Tu peux ajouter :
-
-- une explication du mécanisme,
-- un exemple concret du quotidien,
-- une conséquence,
-- une nuance scientifique,
-- une comparaison utile,
-- un fait complémentaire directement lié.
-
-Ne répète pas les informations déjà présentes.
-
-Conserve ce qui fonctionne déjà dans le hook.
-
-La première scène doit commencer exactement par :
+La première scène DOIT commencer exactement par :
 
 "{INTRO_SIGNATURE}"
 
-La dernière scène doit être exactement :
+La dernière scène DOIT être exactement :
 
 "{CTA_SIGNATURE}"
 
-Conserve impérativement le format :
+Conserve le format actuel :
 
 {data.get("format_choisi", "short_single")}
 
-Le résultat doit être naturel à l'oral et adapté
-à une vidéo de 45 à 60 secondes.
-
-Renvoie le script complet dans le format JSON demandé.
+Renvoie le script complet au format JSON demandé.
 """
+
+    status_cb(
+        "🧠 Ajustement du contenu avec Gemini..."
+    )
 
     repaired = call_gemini_script(
         client,
-        repair_prompt
+        prompt
     )
 
-    repaired = validate_and_repair_script(
-        repaired
-    )
-
-    # On force le format d'origine
     repaired["format_choisi"] = data.get(
         "format_choisi",
-        "short_single"
-    )
-
-    final_words = count_words_in_scenes(
         repaired.get(
-            "script_principal",
-            []
+            "format_choisi",
+            "short_single"
         )
     )
 
-    if final_words < SHORT_MIN_WORDS:
-
-        raise RuntimeError(
-            "Gemini a produit un Short encore "
-            "trop court après la réparation."
-        )
-
-    return repaired
-
-
-# ============================================================
-# PRÉ-TEST RÉEL DE LA DURÉE TTS
-# ============================================================
-
-def preflight_tts_duration(
-    scenes: List[Dict],
-    status_cb=None
-) -> float:
-
-    """
-    Génère temporairement les voix de chaque scène
-    et mesure leur durée réelle.
-
-    Ce pré-test permet de savoir AVANT Pexels si le script
-    produira réellement un Short de 45 à 60 secondes.
-
-    Aucun SFX ni BGM n'est ajouté ici.
-    """
-
-    if not scenes:
-
-        return 0.0
-
-    preflight_dir = (
-        TEMP_DIR
-        / f"preflight_{int(time.time())}_"
-        f"{random.randint(1000, 9999)}"
-    )
-
-    preflight_dir.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    audio_clips = []
-
-    try:
-
-        for idx, scene in enumerate(
-            scenes
-        ):
-
-            audio_path = (
-                preflight_dir
-                / f"tts_{idx:03d}.mp3"
-            )
-
-            generate_tts(
-                scene.get(
-                    "text",
-                    ""
-                ),
-                audio_path
-            )
-
-            audio_clips.append(
-                audio_path
-            )
-
-        concat_file = (
-            preflight_dir
-            / "concat.txt"
-        )
-
-        with open(
-            concat_file,
-            "w",
-            encoding="utf-8"
-        ) as f:
-
-            for audio in audio_clips:
-
-                f.write(
-                    f"file '{audio.name}'\n"
-                )
-
-        combined_audio = (
-            preflight_dir
-            / "combined.wav"
-        )
-
-        run_command(
-            [
-                FFMPEG_BIN,
-                "-y",
-                "-f",
-                "concat",
-                "-safe",
-                "0",
-                "-i",
-                "concat.txt",
-                "-c:a",
-                "pcm_s16le",
-                "-ar",
-                "48000",
-                "-ac",
-                "2",
-                str(combined_audio)
-            ],
-            cwd=preflight_dir
-        )
-
-        duration = get_media_duration(
-            combined_audio
-        )
-
-        return duration
-
-    finally:
-
-        shutil.rmtree(
-            preflight_dir,
-            ignore_errors=True
-        )
-
-
-# ============================================================
-# RÉPARATION BASÉE SUR LA DURÉE RÉELLE
-# ============================================================
-
-def repair_short_script_for_duration(
-    client,
-    topic: str,
-    data: Dict,
-    measured_duration: float,
-    status_cb
-) -> Dict:
-
-    current_words = count_words_in_scenes(
-        data.get(
-            "script_principal",
-            []
-        )
-    )
-
-    current_script = "\n".join(
-        scene.get(
-            "text",
-            ""
-        )
-        for scene in data.get(
-            "script_principal",
-            []
-        )
-    )
-
-    # --------------------------------------------------------
-    # CAS 1 : TROP COURT
-    # --------------------------------------------------------
-
-    if measured_duration < SHORT_PREVIEW_MIN_DURATION:
-
-        status_cb(
-            f"⏱️ Voix trop courte ({measured_duration:.1f} s) : "
-            "enrichissement du contenu..."
-        )
-
-        repair_instruction = f"""
-La narration actuelle produit seulement
-{measured_duration:.1f} secondes avec Edge-TTS.
-
-Elle contient {current_words} mots.
-
-Elle doit atteindre naturellement entre
-45 et 60 secondes.
-
-Réécris le script complet en visant environ
-{SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots.
-
-IMPORTANT :
-
-N'ajoute PAS de blabla.
-
-N'ajoute PAS de répétitions.
-
-N'ajoute PAS de phrases vagues.
-
-N'ajoute PAS de phrases destinées uniquement
-à augmenter la durée.
-
-Ajoute uniquement des informations utiles au sujet :
-
-- mécanisme scientifique,
-- explication plus précise,
-- exemple concret,
-- conséquence,
-- nuance,
-- comparaison pertinente,
-- fait intéressant directement lié.
-
-Chaque nouvelle phrase doit apprendre quelque chose
-ou faire réellement progresser l'explication.
-
-Le sujet est :
-
-{topic.strip()}
-
-Script actuel :
-
-{current_script}
-
-Conserve le hook lorsqu'il est bon.
-
-La première scène doit commencer exactement par :
-
-"{INTRO_SIGNATURE}"
-
-La dernière scène doit être exactement :
-
-"{CTA_SIGNATURE}"
-
-Conserve impérativement le format :
-
-{data.get("format_choisi", "short_single")}
-
-Renvoie le script complet dans le format JSON demandé.
-"""
-
-    # --------------------------------------------------------
-    # CAS 2 : TROP LONG
-    # --------------------------------------------------------
-
-    else:
-
-        status_cb(
-            f"⏱️ Voix trop longue ({measured_duration:.1f} s) : "
-            "resserrage du contenu..."
-        )
-
-        repair_instruction = f"""
-La narration actuelle produit
-{measured_duration:.1f} secondes avec Edge-TTS.
-
-Elle contient {current_words} mots.
-
-Elle dépasse la durée maximale de 60 secondes.
-
-Réécris le script complet pour obtenir naturellement
-environ 47 à 58 secondes.
-
-Vise environ 165 à 180 mots.
-
-IMPORTANT :
-
-Ne supprime pas les informations essentielles.
-
-Supprime en priorité :
-
-- répétitions,
-- formulations inutiles,
-- transitions trop longues,
-- phrases qui n'apportent aucune information.
-
-Conserve :
-
-- le hook,
-- les faits importants,
-- l'explication scientifique,
-- l'exemple concret,
-- la nuance utile,
-- la conclusion.
-
-Le sujet est :
-
-{topic.strip()}
-
-Script actuel :
-
-{current_script}
-
-La première scène doit commencer exactement par :
-
-"{INTRO_SIGNATURE}"
-
-La dernière scène doit être exactement :
-
-"{CTA_SIGNATURE}"
-
-Conserve impérativement le format :
-
-{data.get("format_choisi", "short_single")}
-
-Renvoie le script complet dans le format JSON demandé.
-"""
-
-    repaired = call_gemini_script(
-        client,
-        repair_instruction
-    )
-
-    repaired = validate_and_repair_script(
+    return validate_and_repair_script(
         repaired
     )
 
-    repaired["format_choisi"] = data.get(
-        "format_choisi",
-        "short_single"
-    )
-
-    return repaired
-
 
 # ============================================================
-# CONTRÔLE COMPLET DU SHORT
-# ============================================================
-
-def ensure_short_duration(
-    client,
-    topic: str,
-    data: Dict,
-    status_cb
-) -> Dict:
-
-    """
-    Contrôle en deux niveaux :
-
-    1. nombre de mots,
-    2. durée réelle Edge-TTS.
-
-    Si la durée est mauvaise, Gemini réécrit uniquement
-    ce qui est nécessaire.
-
-    Maximum :
-    2 réparations.
-    """
-
-    # --------------------------------------------------------
-    # ÉTAPE 1 : CONTRÔLE DES MOTS
-    # --------------------------------------------------------
-
-    word_count = count_words_in_scenes(
-        data.get(
-            "script_principal",
-            []
-        )
-    )
-
-    if word_count < SHORT_MIN_WORDS:
-
-        data = expand_short_script(
-            client,
-            topic,
-            data,
-            status_cb
-        )
-
-    # --------------------------------------------------------
-    # ÉTAPE 2 : MESURE TTS RÉELLE
-    # --------------------------------------------------------
-
-    max_repairs = 2
-
-    for attempt in range(
-        max_repairs + 1
-    ):
-
-        status_cb(
-            "🎙️ Test réel de durée de la voix off..."
-        )
-
-        duration = preflight_tts_duration(
-            data.get(
-                "script_principal",
-                []
-            ),
-            status_cb
-        )
-
-        words = count_words_in_scenes(
-            data.get(
-                "script_principal",
-                []
-            )
-        )
-
-        status_cb(
-            f"⏱️ Pré-test : {duration:.1f} s "
-            f"pour {words} mots"
-        )
-
-        # ----------------------------------------------------
-        # DURÉE CORRECTE
-        # ----------------------------------------------------
-
-        if (
-            duration >= SHORT_MIN_DURATION
-            and duration <= SHORT_MAX_DURATION
-        ):
-
-            status_cb(
-                f"✅ Durée validée : "
-                f"{duration:.1f} secondes"
-            )
-
-            return data
-
-        # ----------------------------------------------------
-        # PLUS DE RÉPARATION DISPONIBLE
-        # ----------------------------------------------------
-
-        if attempt >= max_repairs:
-
-            if duration < SHORT_MIN_DURATION:
-
-                raise RuntimeError(
-                    "Impossible d'obtenir une narration "
-                    f"de 45 secondes minimum après "
-                    f"{max_repairs} réparations. "
-                    f"Dernière durée mesurée : "
-                    f"{duration:.1f} s."
-                )
-
-            raise RuntimeError(
-                "Impossible de ramener la narration "
-                "sous 60 secondes après "
-                f"{max_repairs} réparations. "
-                f"Dernière durée mesurée : "
-                f"{duration:.1f} s."
-            )
-
-        # ----------------------------------------------------
-        # RÉPARATION
-        # ----------------------------------------------------
-
-        data = repair_short_script_for_duration(
-            client,
-            topic,
-            data,
-            duration,
-            status_cb
-        )
-
-    return data
-
-
-# ============================================================
-# GÉNÉRATION DU SCRIPT
+# GÉNÉRATION SCRIPT
 # ============================================================
 
 def generate_script_gemini(
     topic: str,
     status_cb
-) -> Dict:
+) -> Tuple[Dict, object]:
 
     if not GEMINI_API_KEY:
 
@@ -1747,42 +1268,27 @@ def generate_script_gemini(
         "du script..."
     )
 
-    try:
-
-        prompt = f"""
+    prompt = f"""
 Sujet à traiter :
 
 {topic.strip()}
 
 Crée le contenu complet de la vidéo.
 
-IMPORTANT POUR UN SHORT :
+Pour un Short :
 
-Si tu choisis short_single ou short_twoparts,
-produis environ {SHORT_TARGET_MIN_WORDS} à
-{SHORT_TARGET_MAX_WORDS} mots de narration
-dans script_principal.
+- vise {SHORT_TARGET_MIN_WORDS} à
+  {SHORT_TARGET_MAX_WORDS} mots,
+- minimum conseillé : {SHORT_MIN_WORDS},
+- maximum normal : {SHORT_MAX_WORDS},
+- durée recherchée : plus de 45 secondes,
+- durée maximale autorisée : 90 secondes.
 
-Minimum :
-{SHORT_MIN_WORDS} mots.
+La zone idéale est environ 50 à 75 secondes.
 
-Maximum normal :
-{SHORT_MAX_WORDS} mots.
+NE REMPLIS PAS avec du blabla.
 
-La durée visée est de 45 à 60 secondes.
-
-Chaque mot doit servir le contenu.
-
-NE remplis jamais artificiellement la durée.
-
-Si tu as suffisamment de matière pour développer
-le sujet, utilise cette place pour :
-
-- expliquer le mécanisme,
-- donner un exemple,
-- montrer une conséquence,
-- apporter une nuance scientifique,
-- donner un détail intéressant.
+Chaque phrase doit apporter une information réelle.
 
 La première scène doit commencer exactement par :
 
@@ -1792,6 +1298,8 @@ La dernière scène doit être exactement :
 
 "{CTA_SIGNATURE}"
 """
+
+    try:
 
         data = call_gemini_script(
             client,
@@ -1803,24 +1311,41 @@ La dernière scène doit être exactement :
             "short_single"
         )
 
-        # ----------------------------------------------------
-        # CONTRÔLE SHORT
-        # ----------------------------------------------------
-
         if format_choisi in (
             "short_single",
             "short_twoparts"
         ):
 
-            data = ensure_short_duration(
-                client,
-                topic,
-                data,
-                status_cb
+            word_count = count_words_in_scenes(
+                data.get(
+                    "script_principal",
+                    []
+                )
             )
 
-        return validate_and_repair_script(
-            data
+            if word_count < SHORT_MIN_WORDS:
+
+                data = repair_script_by_words(
+                    client,
+                    topic,
+                    data,
+                    status_cb,
+                    too_short=True
+                )
+
+            elif word_count > SHORT_MAX_WORDS:
+
+                data = repair_script_by_words(
+                    client,
+                    topic,
+                    data,
+                    status_cb,
+                    too_short=False
+                )
+
+        return (
+            validate_and_repair_script(data),
+            client
         )
 
     except Exception as e:
@@ -1831,29 +1356,167 @@ La dernière scène doit être exactement :
 
 
 # ============================================================
-# PEXELS
+# RÉPARATION APRÈS MESURE AUDIO RÉELLE
 # ============================================================
 
-def clean_pexels_query(
-    query: str
-) -> str:
+def repair_script_by_real_duration(
+    client,
+    topic: str,
+    data: Dict,
+    measured_duration: float,
+    status_cb
+) -> Dict:
 
-    query = re.sub(
-        r"[^a-zA-Z\s]",
-        "",
-        query or ""
+    scenes = data.get(
+        "script_principal",
+        []
     )
 
-    words = [
-        w
-        for w in query.split()
-        if len(w) > 2
-    ]
-
-    return " ".join(
-        words[:4]
+    current_script = "\n".join(
+        scene.get(
+            "text",
+            ""
+        )
+        for scene in scenes
     )
 
+    if measured_duration < SHORT_MIN_DURATION:
+
+        status_cb(
+            f"⏱️ Durée réelle trop courte "
+            f"({measured_duration:.1f} s). "
+            "Ajout d'informations utiles..."
+        )
+
+        prompt = f"""
+Sujet :
+
+{topic.strip()}
+
+Le script actuel produit seulement
+{measured_duration:.1f} secondes avec la vraie voix off.
+
+Il faut dépasser 45 secondes.
+
+Réécris le script pour viser environ
+55 à 70 secondes de narration réelle.
+
+SCRIPT ACTUEL :
+
+{current_script}
+
+IMPORTANT :
+
+N'ajoute aucun remplissage.
+
+Ajoute seulement de vraies informations
+directement liées au sujet :
+
+- mécanisme,
+- explication,
+- exemple concret,
+- conséquence,
+- nuance,
+- fait scientifique pertinent.
+
+Ne répète pas ce qui est déjà dit.
+
+La vidéo doit devenir plus intéressante,
+pas simplement plus longue.
+
+Première scène :
+
+"{INTRO_SIGNATURE}"
+
+Dernière scène :
+
+"{CTA_SIGNATURE}"
+
+Conserve le format :
+
+{data.get("format_choisi", "short_single")}
+
+Renvoie le script complet.
+"""
+
+    else:
+
+        status_cb(
+            f"⏱️ Durée réelle trop longue "
+            f"({measured_duration:.1f} s). "
+            "Resserrement du contenu..."
+        )
+
+        prompt = f"""
+Sujet :
+
+{topic.strip()}
+
+Le script actuel produit
+{measured_duration:.1f} secondes.
+
+La limite maximale est de 90 secondes.
+
+Resserre le script pour viser environ
+55 à 75 secondes.
+
+Supprime :
+
+- répétitions,
+- phrases secondaires,
+- formulations trop longues,
+- digressions.
+
+Conserve :
+
+- le hook,
+- les faits importants,
+- les explications,
+- les exemples utiles,
+- les nuances scientifiques.
+
+Ne détruis pas la logique du raisonnement.
+
+SCRIPT ACTUEL :
+
+{current_script}
+
+Première scène :
+
+"{INTRO_SIGNATURE}"
+
+Dernière scène :
+
+"{CTA_SIGNATURE}"
+
+Conserve le format :
+
+{data.get("format_choisi", "short_single")}
+
+Renvoie le script complet.
+"""
+
+    repaired = call_gemini_script(
+        client,
+        prompt
+    )
+
+    repaired["format_choisi"] = data.get(
+        "format_choisi",
+        repaired.get(
+            "format_choisi",
+            "short_single"
+        )
+    )
+
+    return validate_and_repair_script(
+        repaired
+    )
+
+
+# ============================================================
+# PEXELS
+# ============================================================
 
 def search_pexels_video(
     query: str,
@@ -1861,7 +1524,6 @@ def search_pexels_video(
 ) -> Optional[str]:
 
     if not PEXELS_API_KEY:
-
         return None
 
     clean_query = clean_pexels_query(
@@ -1869,7 +1531,6 @@ def search_pexels_video(
     )
 
     if not clean_query:
-
         clean_query = "human thinking"
 
     url = (
@@ -1896,7 +1557,6 @@ def search_pexels_video(
         )
 
         if r.status_code != 200:
-
             return None
 
         videos = r.json().get(
@@ -1943,19 +1603,16 @@ def search_pexels_video(
                 )
 
                 if not link:
-
                     continue
 
                 if orientation == "portrait":
 
                     if height < 720:
-
                         continue
 
                 else:
 
                     if width < 1280:
-
                         continue
 
                 score = width * height
@@ -1968,7 +1625,6 @@ def search_pexels_video(
                 )
 
         if not candidates:
-
             return None
 
         candidates.sort(
@@ -2017,10 +1673,7 @@ def download_file(
                 ):
 
                     if chunk:
-
-                        f.write(
-                            chunk
-                        )
+                        f.write(chunk)
 
         return (
             dest.exists()
@@ -2143,7 +1796,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if not words:
 
             current_time += scene_duration
-
             continue
 
         chunk_size = (
@@ -2204,22 +1856,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
                     safe_word = (
                         w
-                        .replace(
-                            ",",
-                            ""
-                        )
-                        .replace(
-                            ".",
-                            ""
-                        )
-                        .replace(
-                            "?",
-                            ""
-                        )
-                        .replace(
-                            "!",
-                            ""
-                        )
+                        .replace(",", "")
+                        .replace(".", "")
+                        .replace("?", "")
+                        .replace("!", "")
+                        .replace(";", "")
+                        .replace(":", "")
                     )
 
                     if k == idx_word:
@@ -2263,7 +1905,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 # ============================================================
-# AUDIO
+# AUDIO PAR SCÈNE
 # ============================================================
 
 def process_scene_audio(
@@ -2278,7 +1920,7 @@ def process_scene_audio(
         / f"temp_audio_{idx:03d}.mp3"
     )
 
-    trimmed_audio = (
+    processed_audio = (
         work_dir
         / f"audio_{idx:03d}.wav"
     )
@@ -2309,6 +1951,26 @@ def process_scene_audio(
 
         sfx_to_use = SFX_FILE
 
+    # ========================================================
+    # IMPORTANT
+    # ========================================================
+    #
+    # AVANT :
+    #
+    # silenceremove supprimait les silences de CHAQUE scène.
+    #
+    # Comme chaque phrase était un fichier séparé, ces petites
+    # suppressions s'additionnaient et pouvaient faire perdre
+    # beaucoup de secondes par rapport au pré-test.
+    #
+    # MAINTENANT :
+    #
+    # On conserve la durée réelle produite par Edge-TTS.
+    # On normalise seulement le niveau audio.
+    #
+    # Cela rend la mesure de durée beaucoup plus fiable.
+    # ========================================================
+
     if sfx_to_use:
 
         cmd_mix = [
@@ -2320,23 +1982,13 @@ def process_scene_audio(
             str(sfx_to_use),
             "-filter_complex",
             (
-                "[0:a]"
-                "areverse,"
-                "silenceremove="
-                "start_periods=1:"
-                "start_duration=0:"
-                "start_threshold=-40dB,"
-                "areverse"
-                "[voice];"
                 "[1:a]"
                 "volume=0.16"
                 "[sfx];"
-                "[voice][sfx]"
+                "[0:a][sfx]"
                 "amix=inputs=2:"
                 "duration=first:"
-                "dropout_transition=0"
-                "[mix];"
-                "[mix]"
+                "dropout_transition=0,"
                 "loudnorm="
                 "I=-16:"
                 "LRA=11:"
@@ -2351,7 +2003,7 @@ def process_scene_audio(
             "2",
             "-c:a",
             "pcm_s16le",
-            str(trimmed_audio)
+            str(processed_audio)
         ]
 
         run_command(
@@ -2361,19 +2013,13 @@ def process_scene_audio(
 
     else:
 
-        cmd_trim = [
+        cmd_normalize = [
             FFMPEG_BIN,
             "-y",
             "-i",
             str(temp_audio),
             "-af",
             (
-                "areverse,"
-                "silenceremove="
-                "start_periods=1:"
-                "start_duration=0:"
-                "start_threshold=-40dB,"
-                "areverse,"
                 "loudnorm="
                 "I=-16:"
                 "LRA=11:"
@@ -2385,20 +2031,24 @@ def process_scene_audio(
             "2",
             "-c:a",
             "pcm_s16le",
-            str(trimmed_audio)
+            str(processed_audio)
         ]
 
         run_command(
-            cmd_trim,
+            cmd_normalize,
             cwd=work_dir
         )
 
     scene["duration"] = get_media_duration(
-        trimmed_audio
+        processed_audio
     )
 
-    return trimmed_audio
+    return processed_audio
 
+
+# ============================================================
+# CONCATÉNATION AUDIO
+# ============================================================
 
 def concatenate_audio(
     audio_clips: List[Path],
@@ -2503,11 +2153,7 @@ def add_background_music(
             "[0:a][bgm]"
             "amix=inputs=2:"
             "duration=first:"
-            "dropout_transition=2,"
-            "loudnorm="
-            "I=-14:"
-            "LRA=11:"
-            "TP=-1.5"
+            "dropout_transition=2"
             "[a]"
         ),
         "-map",
@@ -2532,7 +2178,7 @@ def add_background_music(
 
 
 # ============================================================
-# VIDÉO
+# VIDÉO PEXELS
 # ============================================================
 
 def create_video_clip_from_pexels(
@@ -2550,10 +2196,6 @@ def create_video_clip_from_pexels(
 ):
 
     fps = 30
-
-    # --------------------------------------------------------
-    # VRAI CLIP VIDÉO PEXELS
-    # --------------------------------------------------------
 
     base_filter = (
         f"[0:v]"
@@ -2700,6 +2342,10 @@ def create_fallback_video_clip(
     )
 
 
+# ============================================================
+# PIPELINE VIDÉO
+# ============================================================
+
 def generate_video_pipeline(
     script_scenes: List[Dict],
     video_format: str,
@@ -2735,9 +2381,9 @@ def generate_video_pipeline(
         else "landscape"
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # AUDIO
-    # --------------------------------------------------------
+    # ========================================================
 
     status_cb(
         "🎙️ Génération de la voix off..."
@@ -2778,35 +2424,41 @@ def generate_video_pipeline(
         full_audio
     )
 
-    # --------------------------------------------------------
+    status_cb(
+        f"⏱️ Durée audio réelle : "
+        f"{voice_duration:.1f} secondes"
+    )
+
+    # ========================================================
     # CONTRÔLE DURÉE SHORT
-    # --------------------------------------------------------
+    # ========================================================
 
     if video_format == "portrait":
 
-        if voice_duration < SHORT_MIN_DURATION:
+        if voice_duration <= SHORT_MIN_DURATION:
 
-            raise RuntimeError(
-                "Le contrôle audio a détecté une durée "
-                f"inférieure à 45 secondes "
-                f"({voice_duration:.1f} s). "
-                "Le script aurait dû être réparé "
-                "avant le téléchargement des clips."
+            raise ShortTooShortError(
+                "Le script audio réel fait seulement "
+                f"{voice_duration:.1f} secondes. "
+                f"Il faut dépasser {SHORT_MIN_DURATION:.1f} secondes."
             )
 
         if voice_duration > SHORT_MAX_DURATION:
 
-            raise RuntimeError(
-                "Le contrôle audio a détecté une durée "
-                f"supérieure à 60 secondes "
-                f"({voice_duration:.1f} s). "
-                "Le script aurait dû être raccourci "
-                "avant le téléchargement des clips."
+            raise ShortTooLongError(
+                "Le script audio réel fait "
+                f"{voice_duration:.1f} secondes. "
+                f"La limite de sécurité est {SHORT_MAX_DURATION:.0f} secondes."
             )
 
-    # --------------------------------------------------------
-    # VIDÉOS PEXELS
-    # --------------------------------------------------------
+        status_cb(
+            f"✅ Durée validée : "
+            f"{voice_duration:.1f} secondes"
+        )
+
+    # ========================================================
+    # RECHERCHE PEXELS
+    # ========================================================
 
     status_cb(
         "🎥 Recherche des clips vidéo Pexels..."
@@ -2932,8 +2584,6 @@ def generate_video_pipeline(
 
         else:
 
-            # Fallback uniquement si Pexels ne fournit
-            # aucun clip exploitable.
             create_fallback_video_clip(
                 output_clip=output_clip,
                 mascot_img=mascot_img,
@@ -2951,9 +2601,9 @@ def generate_video_pipeline(
             output_clip
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # CONCATÉNATION VIDÉO
-    # --------------------------------------------------------
+    # ========================================================
 
     status_cb(
         "⚡ Fusion des scènes vidéo..."
@@ -3002,14 +2652,14 @@ def generate_video_pipeline(
                 "concat_video.txt",
                 "-c",
                 "copy",
-                str(raw_video.name)
+                "raw_video.mp4"
             ],
             cwd=work_dir
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # SOUS-TITRES
-    # --------------------------------------------------------
+    # ========================================================
 
     status_cb(
         "💬 Création des sous-titres karaoké..."
@@ -3027,9 +2677,9 @@ def generate_video_pipeline(
         height
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # EXPORT FINAL
-    # --------------------------------------------------------
+    # ========================================================
 
     status_cb(
         "🎬 Rendu final..."
@@ -3102,9 +2752,9 @@ def generate_video_pipeline(
         cwd=work_dir
     )
 
-    # --------------------------------------------------------
-    # QC
-    # --------------------------------------------------------
+    # ========================================================
+    # QC FINAL
+    # ========================================================
 
     status_cb(
         "🔍 Contrôle qualité final..."
@@ -3119,27 +2769,26 @@ def generate_video_pipeline(
         )
     )
 
-    # --------------------------------------------------------
-    # CONTRÔLE FINAL SHORT
-    # --------------------------------------------------------
-
     if video_format == "portrait":
 
-        if final_duration < SHORT_MIN_DURATION:
+        if final_duration <= SHORT_MIN_DURATION:
 
-            raise RuntimeError(
+            raise ShortTooShortError(
                 "QC Échec : le Short final fait "
-                f"{final_duration:.1f} secondes. "
-                "Minimum demandé : 45 secondes."
+                f"{final_duration:.1f} secondes."
             )
 
         if final_duration > SHORT_MAX_DURATION:
 
-            raise RuntimeError(
+            raise ShortTooLongError(
                 "QC Échec : le Short final fait "
-                f"{final_duration:.1f} secondes. "
-                "Maximum demandé : 60 secondes."
+                f"{final_duration:.1f} secondes."
             )
+
+    status_cb(
+        f"✅ Vidéo finale validée : "
+        f"{final_duration:.1f} secondes"
+    )
 
     return final_output
 
@@ -3223,7 +2872,388 @@ def split_video_in_two(
 
 
 # ============================================================
-# INTERFACE STREAMLIT
+# SESSION STATE
+# ============================================================
+
+def initialize_session_state():
+
+    defaults = {
+        "generation_done": False,
+        "ai_data": None,
+        "format_choisi": None,
+        "title": None,
+        "video_path": None,
+        "topic_generated": "",
+    }
+
+    for key, value in defaults.items():
+
+        if key not in st.session_state:
+
+            st.session_state[key] = value
+
+
+def save_generation_result(
+    ai_data: Dict,
+    format_choisi: str,
+    video_path,
+    topic: str
+):
+
+    st.session_state.generation_done = True
+    st.session_state.ai_data = ai_data
+    st.session_state.format_choisi = format_choisi
+    st.session_state.title = ai_data.get(
+        "title",
+        "Pourquoi ton cerveau fait ça"
+    )
+    st.session_state.video_path = video_path
+    st.session_state.topic_generated = topic
+
+
+def clear_generation_result():
+
+    st.session_state.generation_done = False
+    st.session_state.ai_data = None
+    st.session_state.format_choisi = None
+    st.session_state.title = None
+    st.session_state.video_path = None
+    st.session_state.topic_generated = ""
+
+
+# ============================================================
+# AFFICHAGE DES RÉSULTATS
+# ============================================================
+
+def render_results():
+
+    if not st.session_state.get(
+        "generation_done",
+        False
+    ):
+        return
+
+    ai_data = st.session_state.ai_data
+    format_choisi = st.session_state.format_choisi
+    video_path = st.session_state.video_path
+    title = st.session_state.title
+
+    if not ai_data or not video_path:
+        return
+
+    st.markdown("---")
+
+    st.markdown(
+        "## 🍿 Ton contenu est prêt !"
+    )
+
+    info_tab, video_tab = st.tabs(
+        [
+            "📄 Informations",
+            "🎥 Vidéo(s)"
+        ]
+    )
+
+    # ========================================================
+    # INFORMATIONS
+    # ========================================================
+
+    with info_tab:
+
+        st.info(
+            f"**Titre suggéré :** {title}"
+        )
+
+        st.write(
+            "**Hashtags :** "
+            + " ".join(
+                ai_data.get(
+                    "hashtags",
+                    []
+                )
+            )
+        )
+
+        word_count = count_words_in_scenes(
+            ai_data.get(
+                "script_principal",
+                []
+            )
+        )
+
+        st.write(
+            f"📝 **Narration : {word_count} mots**"
+        )
+
+        st.caption(
+            "Le Short doit dépasser 45 secondes. "
+            "La limite de sécurité est de 90 secondes. "
+            "Aucun remplissage artificiel n'est ajouté."
+        )
+
+        st.markdown("---")
+
+        with st.expander(
+            "📜 Voir le script complet"
+        ):
+
+            script_complet = ""
+
+            for idx, scene in enumerate(
+                ai_data.get(
+                    "script_principal",
+                    []
+                )
+            ):
+
+                script_complet += (
+                    f"Scène {idx + 1} : "
+                    f"{scene.get('text', '')}\n\n"
+                )
+
+            st.code(
+                script_complet,
+                language="text"
+            )
+
+    # ========================================================
+    # VIDÉOS
+    # ========================================================
+
+    with video_tab:
+
+        if format_choisi == "short_single":
+
+            video_file = Path(
+                str(video_path)
+            )
+
+            if not video_file.exists():
+
+                st.error(
+                    "Le fichier vidéo n'est plus "
+                    "disponible sur le serveur."
+                )
+
+                return
+
+            final_duration = get_media_duration(
+                video_file
+            )
+
+            st.success(
+                f"Durée finale : "
+                f"**{final_duration:.1f} secondes**"
+            )
+
+            st.video(
+                str(video_file)
+            )
+
+            # ------------------------------------------------
+            # IMPORTANT
+            # ------------------------------------------------
+            # on_click="ignore" empêche Streamlit de relancer
+            # l'application lorsqu'on clique sur Télécharger.
+            # ------------------------------------------------
+
+            with open(
+                video_file,
+                "rb"
+            ) as video_file_handle:
+
+                video_bytes = (
+                    video_file_handle.read()
+                )
+
+            st.download_button(
+                "⬇️ Télécharger la vidéo",
+                data=video_bytes,
+                file_name=video_file.name,
+                mime="video/mp4",
+                on_click="ignore",
+                key="download_short_single",
+                type="primary",
+                use_container_width=True
+            )
+
+        elif format_choisi == "short_twoparts":
+
+            paths = [
+                Path(str(x))
+                for x in video_path
+            ]
+
+            if len(paths) < 2:
+                st.error(
+                    "Les deux parties de la vidéo "
+                    "ne sont plus disponibles."
+                )
+                return
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+
+                st.caption(
+                    "Partie 1"
+                )
+
+                st.video(
+                    str(paths[0])
+                )
+
+                if paths[0].exists():
+
+                    with open(
+                        paths[0],
+                        "rb"
+                    ) as f:
+
+                        part1_bytes = f.read()
+
+                    st.download_button(
+                        "⬇️ Partie 1",
+                        data=part1_bytes,
+                        file_name=paths[0].name,
+                        mime="video/mp4",
+                        on_click="ignore",
+                        key="download_part1",
+                        use_container_width=True
+                    )
+
+            with col2:
+
+                st.caption(
+                    "Partie 2"
+                )
+
+                st.video(
+                    str(paths[1])
+                )
+
+                if paths[1].exists():
+
+                    with open(
+                        paths[1],
+                        "rb"
+                    ) as f:
+
+                        part2_bytes = f.read()
+
+                    st.download_button(
+                        "⬇️ Partie 2",
+                        data=part2_bytes,
+                        file_name=paths[1].name,
+                        mime="video/mp4",
+                        on_click="ignore",
+                        key="download_part2",
+                        use_container_width=True
+                    )
+
+        elif format_choisi == "long_plus_teaser":
+
+            paths = [
+                Path(str(x))
+                for x in video_path
+            ]
+
+            if len(paths) < 2:
+
+                st.error(
+                    "Les fichiers vidéo ne sont plus "
+                    "disponibles."
+                )
+
+                return
+
+            # ------------------------------------------------
+            # LONG
+            # ------------------------------------------------
+
+            st.subheader(
+                "📺 Format Long (16:9)"
+            )
+
+            long_duration = get_media_duration(
+                paths[0]
+            )
+
+            st.caption(
+                f"Durée : "
+                f"{long_duration:.1f} secondes"
+            )
+
+            st.video(
+                str(paths[0])
+            )
+
+            if paths[0].exists():
+
+                with open(
+                    paths[0],
+                    "rb"
+                ) as f:
+
+                    long_bytes = f.read()
+
+                st.download_button(
+                    "⬇️ Télécharger la vidéo longue",
+                    data=long_bytes,
+                    file_name=paths[0].name,
+                    mime="video/mp4",
+                    on_click="ignore",
+                    key="download_long_video",
+                    type="primary",
+                    use_container_width=True
+                )
+
+            st.divider()
+
+            # ------------------------------------------------
+            # TEASER
+            # ------------------------------------------------
+
+            st.subheader(
+                "📱 Teaser Short (9:16)"
+            )
+
+            teaser_duration = get_media_duration(
+                paths[1]
+            )
+
+            st.caption(
+                f"Durée : "
+                f"{teaser_duration:.1f} secondes"
+            )
+
+            st.video(
+                str(paths[1])
+            )
+
+            if paths[1].exists():
+
+                with open(
+                    paths[1],
+                    "rb"
+                ) as f:
+
+                    teaser_bytes = f.read()
+
+                st.download_button(
+                    "⬇️ Télécharger le teaser",
+                    data=teaser_bytes,
+                    file_name=paths[1].name,
+                    mime="video/mp4",
+                    on_click="ignore",
+                    key="download_teaser",
+                    type="primary",
+                    use_container_width=True
+                )
+
+
+# ============================================================
+# INTERFACE
 # ============================================================
 
 def main():
@@ -3234,6 +3264,8 @@ def main():
         layout="centered",
         initial_sidebar_state="expanded"
     )
+
+    initialize_session_state()
 
     st.markdown(
         """
@@ -3351,11 +3383,11 @@ def main():
         )
 
         st.caption(
-            "Short : 45 à 60 secondes"
+            "Short : plus de 45 secondes"
         )
 
         st.caption(
-            "Cible script : 165 à 180 mots"
+            "Limite de sécurité : 90 secondes"
         )
 
     # ========================================================
@@ -3394,11 +3426,17 @@ def main():
             "une porte ?"
         ),
         label_visibility="collapsed",
-        height=120
+        height=120,
+        key="topic_input"
     )
 
+    # ========================================================
+    # BOUTON GÉNÉRATION
+    # ========================================================
+
     if st.button(
-        "🚀 LANCER LA GÉNÉRATION"
+        "🚀 LANCER LA GÉNÉRATION",
+        key="generate_video_button"
     ):
 
         if not topic.strip():
@@ -3410,6 +3448,8 @@ def main():
 
             return
 
+        clear_generation_result()
+
         with st.status(
             "🎬 Allumage des caméras virtuelles...",
             expanded=True
@@ -3420,13 +3460,15 @@ def main():
                 def update_status(msg):
                     st.write(msg)
 
-                # --------------------------------------------
+                # ==========================================
                 # SCRIPT
-                # --------------------------------------------
+                # ==========================================
 
-                ai_data = generate_script_gemini(
-                    topic,
-                    update_status
+                ai_data, gemini_client = (
+                    generate_script_gemini(
+                        topic,
+                        update_status
+                    )
                 )
 
                 format_choisi = ai_data.get(
@@ -3452,38 +3494,239 @@ def main():
                 )
 
                 st.write(
-                    f"📝 Narration : **{word_count} mots**"
+                    f"📝 Narration initiale : "
+                    f"**{word_count} mots**"
                 )
 
-                # --------------------------------------------
-                # VIDÉO
-                # --------------------------------------------
+                # ==========================================
+                # SHORT SINGLE
+                # ==========================================
 
                 if format_choisi == "short_single":
 
-                    video_path = (
-                        generate_video_pipeline(
-                            ai_data.get(
-                                "script_principal",
-                                []
-                            ),
-                            "portrait",
-                            update_status
-                        )
-                    )
+                    max_repair_attempts = 2
+                    repair_attempt = 0
+
+                    while True:
+
+                        try:
+
+                            video_path = (
+                                generate_video_pipeline(
+                                    ai_data.get(
+                                        "script_principal",
+                                        []
+                                    ),
+                                    "portrait",
+                                    update_status
+                                )
+                            )
+
+                            break
+
+                        except ShortTooShortError as e:
+
+                            repair_attempt += 1
+
+                            if (
+                                repair_attempt
+                                > max_repair_attempts
+                            ):
+
+                                raise RuntimeError(
+                                    str(e)
+                                    + " Impossible d'obtenir "
+                                    "plus de 45 secondes après "
+                                    "les réparations automatiques."
+                                )
+
+                            measured = re.search(
+                                r"([0-9]+(?:\.[0-9]+)?)",
+                                str(e)
+                            )
+
+                            measured_duration = (
+                                float(
+                                    measured.group(1)
+                                )
+                                if measured
+                                else 44.0
+                            )
+
+                            ai_data = (
+                                repair_script_by_real_duration(
+                                    gemini_client,
+                                    topic,
+                                    ai_data,
+                                    measured_duration,
+                                    update_status
+                                )
+                            )
+
+                            new_word_count = (
+                                count_words_in_scenes(
+                                    ai_data.get(
+                                        "script_principal",
+                                        []
+                                    )
+                                )
+                            )
+
+                            st.write(
+                                "📝 Nouveau script : "
+                                f"**{new_word_count} mots**"
+                            )
+
+                        except ShortTooLongError as e:
+
+                            repair_attempt += 1
+
+                            if (
+                                repair_attempt
+                                > max_repair_attempts
+                            ):
+
+                                raise RuntimeError(
+                                    str(e)
+                                    + " Impossible de rester "
+                                    "sous 90 secondes après "
+                                    "les réparations automatiques."
+                                )
+
+                            measured = re.search(
+                                r"([0-9]+(?:\.[0-9]+)?)",
+                                str(e)
+                            )
+
+                            measured_duration = (
+                                float(
+                                    measured.group(1)
+                                )
+                                if measured
+                                else 91.0
+                            )
+
+                            ai_data = (
+                                repair_script_by_real_duration(
+                                    gemini_client,
+                                    topic,
+                                    ai_data,
+                                    measured_duration,
+                                    update_status
+                                )
+                            )
+
+                            new_word_count = (
+                                count_words_in_scenes(
+                                    ai_data.get(
+                                        "script_principal",
+                                        []
+                                    )
+                                )
+                            )
+
+                            st.write(
+                                "📝 Nouveau script : "
+                                f"**{new_word_count} mots**"
+                            )
+
+                # ==========================================
+                # SHORT TWO PARTS
+                # ==========================================
 
                 elif format_choisi == "short_twoparts":
 
-                    full_video_path = (
-                        generate_video_pipeline(
-                            ai_data.get(
-                                "script_principal",
-                                []
-                            ),
-                            "portrait",
-                            update_status
-                        )
-                    )
+                    max_repair_attempts = 2
+                    repair_attempt = 0
+
+                    while True:
+
+                        try:
+
+                            full_video_path = (
+                                generate_video_pipeline(
+                                    ai_data.get(
+                                        "script_principal",
+                                        []
+                                    ),
+                                    "portrait",
+                                    update_status
+                                )
+                            )
+
+                            break
+
+                        except ShortTooShortError as e:
+
+                            repair_attempt += 1
+
+                            if (
+                                repair_attempt
+                                > max_repair_attempts
+                            ):
+
+                                raise RuntimeError(
+                                    str(e)
+                                )
+
+                            measured = re.search(
+                                r"([0-9]+(?:\.[0-9]+)?)",
+                                str(e)
+                            )
+
+                            measured_duration = (
+                                float(
+                                    measured.group(1)
+                                )
+                                if measured
+                                else 44.0
+                            )
+
+                            ai_data = (
+                                repair_script_by_real_duration(
+                                    gemini_client,
+                                    topic,
+                                    ai_data,
+                                    measured_duration,
+                                    update_status
+                                )
+                            )
+
+                        except ShortTooLongError as e:
+
+                            repair_attempt += 1
+
+                            if (
+                                repair_attempt
+                                > max_repair_attempts
+                            ):
+
+                                raise RuntimeError(
+                                    str(e)
+                                )
+
+                            measured = re.search(
+                                r"([0-9]+(?:\.[0-9]+)?)",
+                                str(e)
+                            )
+
+                            measured_duration = (
+                                float(
+                                    measured.group(1)
+                                )
+                                if measured
+                                else 91.0
+                            )
+
+                            ai_data = (
+                                repair_script_by_real_duration(
+                                    gemini_client,
+                                    topic,
+                                    ai_data,
+                                    measured_duration,
+                                    update_status
+                                )
+                            )
 
                     update_status(
                         "✂️ Découpage de la vidéo "
@@ -3509,6 +3752,10 @@ def main():
                         part2
                     ]
 
+                # ==========================================
+                # LONG + TEASER
+                # ==========================================
+
                 elif format_choisi == "long_plus_teaser":
 
                     long_path = (
@@ -3533,21 +3780,6 @@ def main():
                             "Le teaser est vide."
                         )
 
-                    # ----------------------------------------
-                    # CONTRÔLE DU TEASER
-                    # ----------------------------------------
-
-                    teaser_words = count_words_in_scenes(
-                        teaser_scenes
-                    )
-
-                    if teaser_words < SHORT_MIN_WORDS:
-
-                        raise RuntimeError(
-                            "Le teaser Short est trop court "
-                            f"({teaser_words} mots)."
-                        )
-
                     short_path = (
                         generate_video_pipeline(
                             teaser_scenes,
@@ -3567,6 +3799,21 @@ def main():
                         f"Format inconnu : "
                         f"{format_choisi}"
                     )
+
+                # ==========================================
+                # SAUVEGARDE SESSION
+                # ==========================================
+
+                save_generation_result(
+                    ai_data=ai_data,
+                    format_choisi=format_choisi,
+                    video_path=video_path,
+                    topic=topic
+                )
+
+                # ==========================================
+                # FIN
+                # ==========================================
 
                 status_box.update(
                     label=(
@@ -3594,247 +3841,12 @@ def main():
 
                 return
 
-        # ====================================================
-        # RÉSULTATS
-        # ====================================================
+    # ========================================================
+    # AFFICHAGE PERSISTANT DES RÉSULTATS
+    # ========================================================
 
-        st.markdown("---")
-
-        st.markdown(
-            "## 🍿 Ton contenu est prêt !"
-        )
-
-        info_tab, video_tab = st.tabs(
-            [
-                "📄 Informations",
-                "🎥 Vidéo(s)"
-            ]
-        )
-
-        # ====================================================
-        # INFORMATIONS
-        # ====================================================
-
-        with info_tab:
-
-            st.info(
-                f"**Titre suggéré :** {title}"
-            )
-
-            st.write(
-                "**Hashtags :** "
-                + " ".join(
-                    ai_data.get(
-                        "hashtags",
-                        []
-                    )
-                )
-            )
-
-            st.caption(
-                "Le script est contrôlé avec la durée "
-                "réelle d'Edge-TTS avant la recherche "
-                "des clips Pexels. Aucun remplissage "
-                "artificiel n'est ajouté."
-            )
-
-            st.markdown("---")
-
-            with st.expander(
-                "📜 Voir le script complet"
-            ):
-
-                script_complet = ""
-
-                for idx, scene in enumerate(
-                    ai_data.get(
-                        "script_principal",
-                        []
-                    )
-                ):
-
-                    script_complet += (
-                        f"Scène {idx + 1} : "
-                        f"{scene.get('text', '')}\n\n"
-                    )
-
-                st.code(
-                    script_complet,
-                    language="text"
-                )
-
-        # ====================================================
-        # VIDÉOS
-        # ====================================================
-
-        with video_tab:
-
-            if format_choisi == "short_single":
-
-                final_duration = (
-                    get_media_duration(
-                        video_path
-                    )
-                )
-
-                st.success(
-                    f"Durée finale : "
-                    f"**{final_duration:.1f} secondes**"
-                )
-
-                st.video(
-                    str(video_path)
-                )
-
-                with open(
-                    video_path,
-                    "rb"
-                ) as video_file:
-
-                    video_bytes = (
-                        video_file.read()
-                    )
-
-                st.download_button(
-                    "⬇️ Télécharger la vidéo",
-                    data=video_bytes,
-                    file_name=video_path.name,
-                    mime="video/mp4"
-                )
-
-            elif format_choisi == "short_twoparts":
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-
-                    st.caption(
-                        "Partie 1"
-                    )
-
-                    st.video(
-                        str(
-                            video_path[0]
-                        )
-                    )
-
-                    with open(
-                        video_path[0],
-                        "rb"
-                    ) as f:
-
-                        part1_bytes = f.read()
-
-                    st.download_button(
-                        "⬇️ Partie 1",
-                        data=part1_bytes,
-                        file_name=video_path[0].name,
-                        mime="video/mp4"
-                    )
-
-                with col2:
-
-                    st.caption(
-                        "Partie 2"
-                    )
-
-                    st.video(
-                        str(
-                            video_path[1]
-                        )
-                    )
-
-                    with open(
-                        video_path[1],
-                        "rb"
-                    ) as f:
-
-                        part2_bytes = f.read()
-
-                    st.download_button(
-                        "⬇️ Partie 2",
-                        data=part2_bytes,
-                        file_name=video_path[1].name,
-                        mime="video/mp4"
-                    )
-
-            elif format_choisi == "long_plus_teaser":
-
-                st.subheader(
-                    "📺 Format Long (16:9)"
-                )
-
-                long_duration = (
-                    get_media_duration(
-                        video_path[0]
-                    )
-                )
-
-                st.caption(
-                    f"Durée : "
-                    f"{long_duration:.1f} secondes"
-                )
-
-                st.video(
-                    str(
-                        video_path[0]
-                    )
-                )
-
-                with open(
-                    video_path[0],
-                    "rb"
-                ) as f:
-
-                    long_bytes = f.read()
-
-                st.download_button(
-                    "⬇️ Télécharger la vidéo longue",
-                    data=long_bytes,
-                    file_name=video_path[0].name,
-                    mime="video/mp4"
-                )
-
-                st.divider()
-
-                st.subheader(
-                    "📱 Teaser Short (9:16)"
-                )
-
-                teaser_duration = (
-                    get_media_duration(
-                        video_path[1]
-                    )
-                )
-
-                st.caption(
-                    f"Durée : "
-                    f"{teaser_duration:.1f} secondes"
-                )
-
-                st.video(
-                    str(
-                        video_path[1]
-                    )
-                )
-
-                with open(
-                    video_path[1],
-                    "rb"
-                ) as f:
-
-                    teaser_bytes = f.read()
-
-                st.download_button(
-                    "⬇️ Télécharger le teaser",
-                    data=teaser_bytes,
-                    file_name=video_path[1].name,
-                    mime="video/mp4"
-                )
-
-        st.balloons()
+    render_results()
 
 
 if __name__ == "__main__":
     main()
-            
