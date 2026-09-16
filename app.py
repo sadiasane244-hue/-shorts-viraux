@@ -582,8 +582,10 @@ def fix_phonetics_for_tts(
     # Le CTA demandé reste exactement celui défini
     # dans CTA_SIGNATURE.
 
-    return text
-
+    return text.replace(
+    "le faire buguer",
+    "le faire beuguer"
+    )
 
 def generate_tts(
     text: str,
