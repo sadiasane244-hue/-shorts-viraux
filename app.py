@@ -35,6 +35,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # ============================================================
 
 def get_secret(name: str) -> str:
+
     value = os.environ.get(name, "")
 
     if value:
@@ -84,14 +85,13 @@ CTA_SIGNATURE = (
 # DURÉE DES SHORTS
 # ============================================================
 
-# IMPORTANT :
 # Le Short doit faire PLUS de 45 secondes.
+#
 # Il n'y a plus de limite stricte à 60 secondes.
 #
-# 90 secondes = limite de sécurité.
+# 90 secondes = limite technique de sécurité.
 #
-# On vise volontairement une zone confortable entre
-# environ 50 et 75 secondes, sans jamais remplir artificiellement.
+# La zone idéale reste volontairement autour de 50 à 75 s.
 
 SHORT_MIN_DURATION = 45.1
 SHORT_TARGET_MIN_DURATION = 50.0
@@ -105,38 +105,64 @@ SHORT_MAX_WORDS = 200
 
 
 # ============================================================
-# FICHIERS AUDIO OPTIONNELS
+# AUDIO
 # ============================================================
 
-SFX_FILE = next(
-    (
-        f
-        for f in BASE_DIR.iterdir()
-        if f.is_file()
-        and "sfx_whoosh" in f.name.lower()
-    ),
-    BASE_DIR / "sfx_whoosh.mp3"
-)
+# ------------------------------------------------------------
+# NASHEED
+# ------------------------------------------------------------
+#
+# Déposer le fichier à la racine du dépôt :
+#
+# nasheed.mp3
+#
+# Si le fichier n'existe pas, aucune musique de fond
+# ne sera utilisée.
+#
+# Le système n'utilise volontairement PAS de piste
+# "bgm.mp3".
+# ------------------------------------------------------------
 
-CLICK_SFX_FILE = next(
-    (
-        f
-        for f in BASE_DIR.iterdir()
-        if f.is_file()
-        and "sfx_ding" in f.name.lower()
-    ),
-    BASE_DIR / "sfx_ding.mp3"
-)
+NASHEED_FILE = BASE_DIR / "nasheed.mp3"
 
-BGM_FILE = next(
-    (
-        f
-        for f in BASE_DIR.iterdir()
-        if f.is_file()
-        and "bgm" in f.name.lower()
-    ),
-    BASE_DIR / "bgm.mp3"
-)
+# Volume de base du nasheed.
+#
+# 0.055 = environ 5,5 %.
+#
+# La voix reste largement dominante.
+NASHEED_VOLUME = 0.055
+
+
+# ------------------------------------------------------------
+# SFX
+# ------------------------------------------------------------
+
+WHOOSH_SFX_FILE = BASE_DIR / "sfx_whoosh.mp3"
+POP_SFX_FILE = BASE_DIR / "sfx_pop.mp3"
+DING_SFX_FILE = BASE_DIR / "sfx_ding.mp3"
+
+
+# Volumes intelligents des effets.
+#
+# Les effets sont courts et ponctuels.
+SFX_VOLUME_WHOOSH = 0.13
+SFX_VOLUME_POP = 0.10
+SFX_VOLUME_DING = 0.15
+
+
+# Durée maximale utilisée pour chaque effet.
+SFX_MAX_DURATION_WHOOSH = 0.80
+SFX_MAX_DURATION_POP = 0.45
+SFX_MAX_DURATION_DING = 0.85
+
+
+# Décalage volontaire de quelques millisecondes.
+#
+# Cela évite que le SFX démarre exactement sur la première
+# syllabe de la phrase.
+SFX_DELAY_WHOOSH = 90
+SFX_DELAY_POP = 70
+SFX_DELAY_DING = 110
 
 
 # ============================================================
@@ -158,6 +184,7 @@ MASCOT_FILES = {
 
 
 if not MASCOT_FILES["default"].exists():
+
     Image.new(
         "RGBA",
         (200, 200),
@@ -550,8 +577,10 @@ def fix_phonetics_for_tts(
 ) -> str:
 
     # IMPORTANT :
-    # On ne remplace plus "buguer" par "beuguer".
-    # Le CTA affiché et prononcé reste fidèle au texte demandé.
+    # Aucun remplacement de "buguer".
+    #
+    # Le CTA demandé reste exactement celui défini
+    # dans CTA_SIGNATURE.
 
     return text
 
@@ -641,7 +670,7 @@ DURÉE DES SHORTS
 
 ATTENTION :
 
-Le Short doit durer PLUS DE 45 secondes.
+Le Short doit durer PLUS de 45 secondes.
 
 Il n'est PAS limité à 60 secondes.
 
@@ -1905,6 +1934,201 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 # ============================================================
+# CHOIX INTELLIGENT DU SFX
+# ============================================================
+
+def choose_sfx_for_scene(
+    scene: Dict,
+    idx: int,
+    total_scenes: int
+) -> Optional[Dict]:
+
+    text = str(
+        scene.get(
+            "text",
+            ""
+        )
+    ).strip().lower()
+
+    emotion = str(
+        scene.get(
+            "emotion",
+            "default"
+        )
+    ).strip().lower()
+
+    # --------------------------------------------------------
+    # DERNIÈRE SCÈNE
+    # --------------------------------------------------------
+    #
+    # Le ding accompagne la conclusion / CTA.
+    # --------------------------------------------------------
+
+    if idx == total_scenes - 1:
+
+        if DING_SFX_FILE.exists():
+
+            return {
+                "file": DING_SFX_FILE,
+                "volume": SFX_VOLUME_DING,
+                "delay": SFX_DELAY_DING,
+                "max_duration": SFX_MAX_DURATION_DING,
+                "name": "ding"
+            }
+
+    # --------------------------------------------------------
+    # PREMIÈRE VRAIE SCÈNE APRÈS L'INTRO
+    # --------------------------------------------------------
+    #
+    # Un whoosh peut accentuer l'entrée dans le sujet.
+    # --------------------------------------------------------
+
+    if idx == 1:
+
+        if WHOOSH_SFX_FILE.exists():
+
+            return {
+                "file": WHOOSH_SFX_FILE,
+                "volume": SFX_VOLUME_WHOOSH,
+                "delay": SFX_DELAY_WHOOSH,
+                "max_duration": SFX_MAX_DURATION_WHOOSH,
+                "name": "whoosh"
+            }
+
+    # --------------------------------------------------------
+    # ÉMOTIONS FORTES
+    # --------------------------------------------------------
+
+    if emotion in (
+        "shocked",
+        "surprised"
+    ):
+
+        if POP_SFX_FILE.exists():
+
+            return {
+                "file": POP_SFX_FILE,
+                "volume": SFX_VOLUME_POP,
+                "delay": SFX_DELAY_POP,
+                "max_duration": SFX_MAX_DURATION_POP,
+                "name": "pop"
+            }
+
+    # --------------------------------------------------------
+    # MOTS / FORMULATIONS DE TRANSITION
+    # --------------------------------------------------------
+
+    transition_words = [
+        "mais",
+        "pourtant",
+        "en réalité",
+        "en fait",
+        "le problème",
+        "voilà pourquoi",
+        "c'est là",
+        "et c'est là",
+        "sauf que",
+        "cependant",
+        "résultat",
+        "donc",
+    ]
+
+    if any(
+        keyword in text
+        for keyword in transition_words
+    ):
+
+        if WHOOSH_SFX_FILE.exists():
+
+            return {
+                "file": WHOOSH_SFX_FILE,
+                "volume": SFX_VOLUME_WHOOSH,
+                "delay": SFX_DELAY_WHOOSH,
+                "max_duration": SFX_MAX_DURATION_WHOOSH,
+                "name": "whoosh"
+            }
+
+    # --------------------------------------------------------
+    # RÉVÉLATION / INFORMATION IMPORTANTE
+    # --------------------------------------------------------
+
+    reveal_words = [
+        "surprenant",
+        "surprenante",
+        "important",
+        "incroyable",
+        "bizarre",
+        "étonnant",
+        "étonnante",
+        "détail",
+        "secret",
+        "mécanisme",
+        "résultat",
+        "découvre",
+        "découvrir",
+        "pourquoi",
+    ]
+
+    if any(
+        keyword in text
+        for keyword in reveal_words
+    ):
+
+        if POP_SFX_FILE.exists():
+
+            return {
+                "file": POP_SFX_FILE,
+                "volume": SFX_VOLUME_POP,
+                "delay": SFX_DELAY_POP,
+                "max_duration": SFX_MAX_DURATION_POP,
+                "name": "pop"
+            }
+
+    # --------------------------------------------------------
+    # QUESTIONS
+    # --------------------------------------------------------
+
+    if "?" in text:
+
+        if POP_SFX_FILE.exists():
+
+            return {
+                "file": POP_SFX_FILE,
+                "volume": SFX_VOLUME_POP,
+                "delay": SFX_DELAY_POP,
+                "max_duration": SFX_MAX_DURATION_POP,
+                "name": "pop"
+            }
+
+    # --------------------------------------------------------
+    # FALLBACK RARE
+    # --------------------------------------------------------
+    #
+    # On évite de mettre des SFX sur toutes les scènes.
+    # Toutes les 4 scènes maximum, un whoosh peut servir
+    # de transition si aucun meilleur déclencheur n'a été
+    # détecté.
+    # --------------------------------------------------------
+
+    if (
+        idx > 1
+        and idx % 4 == 0
+    ):
+
+        if WHOOSH_SFX_FILE.exists():
+
+            return {
+                "file": WHOOSH_SFX_FILE,
+                "volume": SFX_VOLUME_WHOOSH,
+                "delay": SFX_DELAY_WHOOSH,
+                "max_duration": SFX_MAX_DURATION_WHOOSH,
+                "name": "whoosh"
+            }
+
+    return None
+
+
+# ============================================================
 # AUDIO PAR SCÈNE
 # ============================================================
 
@@ -1930,48 +2154,63 @@ def process_scene_audio(
         temp_audio
     )
 
-    is_last = (
-        idx == total_scenes - 1
+    # --------------------------------------------------------
+    # CHOIX DU SFX
+    # --------------------------------------------------------
+
+    sfx_info = choose_sfx_for_scene(
+        scene,
+        idx,
+        total_scenes
     )
 
-    sfx_to_use = None
+    # --------------------------------------------------------
+    # SANS SFX
+    # --------------------------------------------------------
 
-    if (
-        is_last
-        and CLICK_SFX_FILE.exists()
-    ):
+    if not sfx_info:
 
-        sfx_to_use = CLICK_SFX_FILE
+        cmd_normalize = [
+            FFMPEG_BIN,
+            "-y",
+            "-i",
+            str(temp_audio),
+            "-af",
+            (
+                "aresample=48000,"
+                "aformat="
+                "channel_layouts=stereo,"
+                "loudnorm="
+                "I=-16:"
+                "LRA=11:"
+                "TP=-1.5"
+            ),
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-c:a",
+            "pcm_s16le",
+            str(processed_audio)
+        ]
 
-    elif (
-        idx > 0
-        and idx % 3 == 0
-        and SFX_FILE.exists()
-    ):
+        run_command(
+            cmd_normalize,
+            cwd=work_dir
+        )
 
-        sfx_to_use = SFX_FILE
+    # --------------------------------------------------------
+    # AVEC SFX
+    # --------------------------------------------------------
 
-    # ========================================================
-    # IMPORTANT
-    # ========================================================
-    #
-    # AVANT :
-    #
-    # silenceremove supprimait les silences de CHAQUE scène.
-    #
-    # Comme chaque phrase était un fichier séparé, ces petites
-    # suppressions s'additionnaient et pouvaient faire perdre
-    # beaucoup de secondes par rapport au pré-test.
-    #
-    # MAINTENANT :
-    #
-    # On conserve la durée réelle produite par Edge-TTS.
-    # On normalise seulement le niveau audio.
-    #
-    # Cela rend la mesure de durée beaucoup plus fiable.
-    # ========================================================
+    else:
 
-    if sfx_to_use:
+        sfx_file = sfx_info["file"]
+        sfx_volume = sfx_info["volume"]
+        sfx_delay = sfx_info["delay"]
+        sfx_max_duration = sfx_info[
+            "max_duration"
+        ]
 
         cmd_mix = [
             FFMPEG_BIN,
@@ -1979,14 +2218,28 @@ def process_scene_audio(
             "-i",
             str(temp_audio),
             "-i",
-            str(sfx_to_use),
+            str(sfx_file),
             "-filter_complex",
             (
+                "[0:a]"
+                "aresample=48000,"
+                "aformat="
+                "channel_layouts=stereo"
+                "[voice];"
+
                 "[1:a]"
-                "volume=0.16"
+                f"atrim=0:{sfx_max_duration},"
+                "asetpts=N/SR/TB,"
+                f"volume={sfx_volume},"
+                f"adelay={sfx_delay}|{sfx_delay},"
+                "aresample=48000,"
+                "aformat="
+                "channel_layouts=stereo"
                 "[sfx];"
-                "[0:a][sfx]"
-                "amix=inputs=2:"
+
+                "[voice][sfx]"
+                "amix="
+                "inputs=2:"
                 "duration=first:"
                 "dropout_transition=0,"
                 "loudnorm="
@@ -2011,33 +2264,9 @@ def process_scene_audio(
             cwd=work_dir
         )
 
-    else:
-
-        cmd_normalize = [
-            FFMPEG_BIN,
-            "-y",
-            "-i",
-            str(temp_audio),
-            "-af",
-            (
-                "loudnorm="
-                "I=-16:"
-                "LRA=11:"
-                "TP=-1.5"
-            ),
-            "-ar",
-            "48000",
-            "-ac",
-            "2",
-            "-c:a",
-            "pcm_s16le",
-            str(processed_audio)
-        ]
-
-        run_command(
-            cmd_normalize,
-            cwd=work_dir
-        )
+    # --------------------------------------------------------
+    # DURÉE RÉELLE DE LA SCÈNE
+    # --------------------------------------------------------
 
     scene["duration"] = get_media_duration(
         processed_audio
@@ -2101,9 +2330,14 @@ def concatenate_audio(
     return raw_audio
 
 
-def add_background_music(
+# ============================================================
+# NASHEED + MIXAGE INTELLIGENT
+# ============================================================
+
+def add_nasheed_track(
     voice_audio: Path,
-    work_dir: Path
+    work_dir: Path,
+    status_cb=None
 ) -> Path:
 
     output = (
@@ -2111,7 +2345,18 @@ def add_background_music(
         / "full_audio.m4a"
     )
 
-    if not BGM_FILE.exists():
+    # --------------------------------------------------------
+    # PAS DE NASHEED
+    # --------------------------------------------------------
+
+    if not NASHEED_FILE.exists():
+
+        if status_cb:
+
+            status_cb(
+                "🎙️ Aucun nasheed détecté : "
+                "voix seule."
+            )
 
         run_command(
             [
@@ -2134,38 +2379,111 @@ def add_background_music(
 
         return output
 
+    # --------------------------------------------------------
+    # NASHEED ACTIF
+    # --------------------------------------------------------
+
+    if status_cb:
+
+        status_cb(
+            "🎵 Nasheed détecté : "
+            "mixage vocal intelligent..."
+        )
+
     cmd = [
         FFMPEG_BIN,
         "-y",
+
+        # VOIX
         "-i",
         str(voice_audio),
+
+        # NASHEED
         "-stream_loop",
         "-1",
         "-i",
-        str(BGM_FILE),
+        str(NASHEED_FILE),
+
         "-filter_complex",
         (
+            # ------------------------------------------------
+            # VOIX
+            # ------------------------------------------------
+            "[0:a]"
+            "aresample=48000,"
+            "aformat="
+            "channel_layouts=stereo,"
+            "volume=1.0"
+            "[voice];"
+
+            # ------------------------------------------------
+            # NASHEED
+            # ------------------------------------------------
+            #
+            # On coupe les fréquences extrêmes pour laisser
+            # davantage d'espace à la voix.
+            #
+            # Le volume reste volontairement faible.
+            # ------------------------------------------------
             "[1:a]"
-            "volume=0.045,"
-            "highpass=f=80,"
-            "lowpass=f=10000"
-            "[bgm];"
-            "[0:a][bgm]"
-            "amix=inputs=2:"
+            "aresample=48000,"
+            "aformat="
+            "channel_layouts=stereo,"
+            f"volume={NASHEED_VOLUME},"
+            "highpass=f=100,"
+            "lowpass=f=9000,"
+            "afade=t=in:st=0:d=1.5"
+            "[nasheed_raw];"
+
+            # ------------------------------------------------
+            # DUCKING
+            # ------------------------------------------------
+            #
+            # Lorsque la voix devient présente, le nasheed
+            # est automatiquement abaissé.
+            #
+            # Cela évite que la musique masque les mots.
+            # ------------------------------------------------
+            "[nasheed_raw][voice]"
+            "sidechaincompress="
+            "threshold=0.045:"
+            "ratio=7:"
+            "attack=20:"
+            "release=300:"
+            "makeup=1:"
+            "knee=3"
+            "[nasheed_ducked];"
+
+            # ------------------------------------------------
+            # MIX FINAL
+            # ------------------------------------------------
+            "[voice][nasheed_ducked]"
+            "amix="
+            "inputs=2:"
             "duration=first:"
-            "dropout_transition=2"
-            "[a]"
+            "dropout_transition=2,"
+            "loudnorm="
+            "I=-16:"
+            "LRA=11:"
+            "TP=-1.5"
+            "[mixed]"
         ),
+
         "-map",
-        "[a]",
+        "[mixed]",
+
         "-ar",
         "48000",
+
         "-ac",
         "2",
+
         "-c:a",
         "aac",
+
         "-b:a",
         "192k",
+
         str(output)
     ]
 
@@ -2415,9 +2733,14 @@ def generate_video_pipeline(
         work_dir
     )
 
-    full_audio = add_background_music(
+    # ========================================================
+    # NASHEED
+    # ========================================================
+
+    full_audio = add_nasheed_track(
         raw_audio,
-        work_dir
+        work_dir,
+        status_cb
     )
 
     voice_duration = get_media_duration(
@@ -2991,6 +3314,43 @@ def render_results():
             "Aucun remplissage artificiel n'est ajouté."
         )
 
+        # ----------------------------------------------------
+        # AUDIO
+        # ----------------------------------------------------
+
+        st.markdown("---")
+
+        if NASHEED_FILE.exists():
+
+            st.success(
+                "🎵 Nasheed : actif"
+            )
+
+        else:
+
+            st.info(
+                "🎵 Nasheed : aucun fichier "
+                "`nasheed.mp3` détecté."
+            )
+
+        active_sfx = []
+
+        if WHOOSH_SFX_FILE.exists():
+            active_sfx.append("whoosh")
+
+        if POP_SFX_FILE.exists():
+            active_sfx.append("pop")
+
+        if DING_SFX_FILE.exists():
+            active_sfx.append("ding")
+
+        if active_sfx:
+
+            st.caption(
+                "🔊 SFX actifs : "
+                + ", ".join(active_sfx)
+            )
+
         st.markdown("---")
 
         with st.expander(
@@ -3050,13 +3410,6 @@ def render_results():
                 str(video_file)
             )
 
-            # ------------------------------------------------
-            # IMPORTANT
-            # ------------------------------------------------
-            # on_click="ignore" empêche Streamlit de relancer
-            # l'application lorsqu'on clique sur Télécharger.
-            # ------------------------------------------------
-
             with open(
                 video_file,
                 "rb"
@@ -3085,10 +3438,12 @@ def render_results():
             ]
 
             if len(paths) < 2:
+
                 st.error(
                     "Les deux parties de la vidéo "
                     "ne sont plus disponibles."
                 )
+
                 return
 
             col1, col2 = st.columns(2)
@@ -3370,6 +3725,54 @@ def main():
         st.write(
             "Pipeline Gemini + Edge-TTS + "
             "Pexels Video + FFmpeg."
+        )
+
+        st.markdown("---")
+
+        # ----------------------------------------------------
+        # AUDIO
+        # ----------------------------------------------------
+
+        st.markdown(
+            "### 🎵 Audio"
+        )
+
+        if NASHEED_FILE.exists():
+
+            st.success(
+                "Nasheed actif"
+            )
+
+            st.caption(
+                "`nasheed.mp3` détecté."
+            )
+
+        else:
+
+            st.info(
+                "Nasheed désactivé"
+            )
+
+            st.caption(
+                "Ajoute `nasheed.mp3` à la racine "
+                "du dépôt pour l'activer."
+            )
+
+        sfx_count = sum(
+            [
+                WHOOSH_SFX_FILE.exists(),
+                POP_SFX_FILE.exists(),
+                DING_SFX_FILE.exists()
+            ]
+        )
+
+        st.caption(
+            f"🔊 {sfx_count}/3 bruitages disponibles"
+        )
+
+        st.caption(
+            "Voix prioritaire • SFX synchronisés • "
+            "Nasheed automatiquement abaissé sous la voix"
         )
 
         st.markdown("---")
