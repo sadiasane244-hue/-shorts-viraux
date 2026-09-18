@@ -1,5 +1,5 @@
 # ============================================================
-# CERVEAU CURIEUX — STUDIO IA AUTONOME (v3 — Viral Edition)
+# CERVEAU CURIEUX — STUDIO IA AUTONOME (v4 — Clean Video Edition)
 # ============================================================
 
 import os
@@ -53,7 +53,7 @@ FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
 
 
 # ============================================================
-# TTS — RATE ADAPTATIF PAR ÉMOTION (AMÉLIORÉ v3)
+# TTS — RATE ADAPTATIF PAR ÉMOTION
 # ============================================================
 
 TTS_VOICE = "fr-FR-HenriNeural"
@@ -142,8 +142,13 @@ MASCOT_FILES = {
     "sad":        BASE_DIR / "mascot_sad.png",
 }
 
-if not MASCOT_FILES["default"].exists():
-    Image.new("RGBA", (200, 200), color=(0, 0, 0, 0)).save(MASCOT_FILES["default"])
+# ▼ v4 : plus de PNG transparent vide créé automatiquement.
+# Si aucune mascotte n'existe → pas d'overlay mascotte.
+# L'utilisateur est prévenu dans la sidebar Streamlit.
+
+
+def has_any_mascot() -> bool:
+    return any(p.exists() for p in MASCOT_FILES.values())
 
 
 # ============================================================
@@ -159,7 +164,7 @@ class ShortTooLongError(RuntimeError):
 
 
 # ============================================================
-# SCHÉMA JSON GEMINI
+# SCHÉMA JSON GEMINI (v4 : plus de scene_hook_text)
 # ============================================================
 
 class Scene(BaseModel):
@@ -168,14 +173,6 @@ class Scene(BaseModel):
             "UNE SEULE phrase courte de narration. "
             "Ton moderne, jeune, urbain. "
             "Ponctuation finale obligatoire : . ! ou ?"
-        )
-    )
-
-    scene_hook_text: str = Field(
-        description=(
-            "2 à 4 MOTS MAJUSCULES affichés en gros à l'écran. "
-            "Ex: 'DOPAMINE', 'TON CERVEAU', 'PIÈGE MENTAL', "
-            "'9 SUR 10', 'ATTENDS'."
         )
     )
 
@@ -197,8 +194,13 @@ class Scene(BaseModel):
 
     visual_query: str = Field(
         description=(
-            "Mots-clés visuels en anglais, 2 à 4 mots, "
-            "action physique concrète (vidéo Pexels)."
+            "OBLIGATOIRE : action FILMABLE en anglais, "
+            "2 à 4 mots, avec un SUJET PHYSIQUE "
+            "(person, man, woman, kid, couple, student...). "
+            "Ex: 'person opening door', 'man rubbing eyes', "
+            "'woman checking phone', 'student studying desk'. "
+            "JAMAIS de concept abstrait comme 'memory', "
+            "'brain power', 'psychology'."
         )
     )
 
@@ -378,7 +380,7 @@ def generate_tts(text: str, output_path: Path, emotion: str = "default",
 
 
 # ============================================================
-# PROMPT GEMINI (v3 — Viral / Relances / Punchlines)
+# PROMPT GEMINI (v4 — Visual Query renforcé)
 # ============================================================
 
 SYSTEM_PROMPT = f"""
@@ -402,24 +404,14 @@ Deux idées = deux scènes.
 RÈGLE D'OR N°2 — HUMOUR, RELANCE, PUNCHLINE
 ============================================================
 
-Le spectateur doit être accroché du début à la fin.
-
 A. RELANCES (obligatoires)
 --------------------------
 Toutes les 2 ou 3 scènes, insère une RELANCE : une scène ULTRA-COURTE
-(3 à 6 mots) qui relance l'attention et casse le rythme.
+(3 à 6 mots) qui relance l'attention.
 
-Exemples de relances (n'en utilise pas deux fois la même) :
-"Attends."
-"Écoute ça."
-"Et c'est pas fini."
-"Là, ton cerveau bugue."
-"Ça paraît fou."
-"Et le pire ?"
-"Sauf que..."
-"Regarde bien."
-"Mais voilà le piège."
-"Accroche-toi."
+Exemples : "Attends.", "Écoute ça.", "Et c'est pas fini.",
+"Là, ton cerveau bugue.", "Et le pire ?", "Sauf que...",
+"Regarde bien.", "Accroche-toi."
 
 Une RELANCE = une scène à part, intensity 4 ou 5.
 
@@ -429,15 +421,11 @@ Enchaîner 4 explications de suite.
 
 B. PUNCHLINES (obligatoires)
 ----------------------------
-AU MOINS 3 punchlines dans la vidéo : phrases courtes, percutantes,
-drôles ou qui font réagir.
+AU MOINS 3 punchlines : phrases courtes, percutantes, drôles.
 
-Exemples :
-"Ton cerveau te ment. En boucle. Gratuitement."
+Exemples : "Ton cerveau te ment. En boucle. Gratuitement."
 "C'est pas toi, c'est ta biologie qui te trolle."
-"Ton cerveau économise l'énergie. Il te sabote au passage."
 "Tu crois décider. En vrai, tu subis."
-"Ton cerveau fait des raccourcis. Parfois ils sont foireux."
 
 Une punchline = une scène à part, intensity 4 ou 5.
 
@@ -445,17 +433,13 @@ Une punchline = une scène à part, intensity 4 ou 5.
 RÈGLE D'OR N°3 — RYTHME VARIABLE (CRITIQUE)
 ============================================================
 
-Tu dois alterner 3 types de scènes :
-
 - SCÈNE COURTE (3-7 mots) : intensity 4-5 → relance, punchline.
-- SCÈNE MOYENNE (10-15 mots) : intensity 2-3 → exemple, conséquence.
-- SCÈNE LONGUE (16-22 mots max) : intensity 1-2 → explication posée.
+- SCÈNE MOYENNE (10-15 mots) : intensity 2-3 → exemple.
+- SCÈNE LONGUE (16-22 mots max) : intensity 1-2 → explication.
 
 RÈGLE STRICTE :
 JAMAIS 3 scènes consécutives avec la même intensity.
 JAMAIS 3 scènes consécutives avec la même longueur.
-
-Si tu écris 4 scènes informatives d'affilée, TU AS ÉCHOUÉ.
 
 ============================================================
 IDENTITÉ DE MARQUE
@@ -466,14 +450,9 @@ Scène 1 DOIT commencer exactement par :
 
 Puis, dans la MÊME phrase, un HOOK fort qui crée une curiosité honnête.
 
-Exemples acceptables :
+Exemples :
 - "Wesh l'équipe, ton cerveau te fait oublier des trucs exprès."
 - "Wesh l'équipe, cette illusion marche sur 9 personnes sur 10."
-- "Wesh l'équipe, ton cerveau te trolle tous les jours."
-
-Interdit :
-- "Bienvenue sur la chaîne."
-- Promesses mensongères.
 
 ============================================================
 TON & STYLE (STREET MAIS INTELLIGENT)
@@ -482,23 +461,18 @@ TON & STYLE (STREET MAIS INTELLIGENT)
 - Tutoiement permanent.
 - Ton pote qui explique un truc fou, PAS un prof.
 - Street, moderne, direct.
-- "frérot", "ton cerveau bugue", "ça te trolle",
-  "c'est chaud", "attends" → OK.
+- "frérot", "ton cerveau bugue", "ça te trolle" → OK.
 - Pas d'insulte, pas de vulgarité lourde.
-- Chaque mot compte. Aucune phrase de remplissage.
+- Chaque mot compte.
 
 ============================================================
-STRUCTURE NARRATIVE (BOUCLE + RELANCES)
+STRUCTURE NARRATIVE
 ============================================================
 
-1. Scène 1 : Signature + Hook (open loop = promesse de révélation).
+1. Scène 1 : Signature + Hook (open loop).
 2. Scène 2 : RELANCE courte ("Attends.").
 3. Scène 3 : Énoncé du phénomène.
-4. Scènes 4-9 : Alternance OBLIGATOIRE de :
-   - explication (longue, intensity 1-2)
-   - exemple (moyenne, intensity 3)
-   - relance (courte, intensity 4-5)
-   - punchline (courte, intensity 4-5)
+4. Scènes 4-9 : Alternance explication / exemple / relance / punchline.
 5. Scène -2 : PAYOFF = réponse explicite à la promesse du début.
 6. Scène -1 : CTA EXACT :
    "{CTA_SIGNATURE}"
@@ -509,7 +483,6 @@ RIGUEUR SCIENTIFIQUE
 
 - Ne jamais inventer un fait, une expérience ou un chiffre.
 - Ne jamais présenter une hypothèse comme une certitude.
-- Nuances expliquées en une phrase simple.
 
 ============================================================
 DURÉE
@@ -520,16 +493,45 @@ DURÉE
 - 150 à 180 mots. Max 200.
 
 ============================================================
-SCENE_HOOK_TEXT (OVERLAY VISUEL)
+VISUAL_QUERY — RÈGLE ABSOLUE (CRITIQUE)
 ============================================================
 
-Pour CHAQUE scène, écris un `scene_hook_text` :
-- 2 à 4 MOTS MAXIMUM
-- EN MAJUSCULES
-- Résumé visuel ultra-court de la scène
-- Exemples : "DOPAMINE", "TON CERVEAU", "PIÈGE MENTAL",
-  "9 SUR 10", "C'EST FAUX", "MÉMOIRE COURTE", "ATTENDS"
-- Pas de ponctuation finale.
+Le visual_query sera utilisé pour chercher une VRAIE VIDÉO
+sur Pexels. Il DOIT décrire une action filmable par une caméra.
+
+RÈGLES STRICTES :
+
+1. Il DOIT contenir un SUJET PHYSIQUE visible :
+   - person, man, woman, kid, student, couple, family,
+     doctor, worker, athlete, driver, cook, teacher.
+
+2. Il DOIT décrire une ACTION ou une SITUATION CONCRÈTE :
+   - opening door, rubbing eyes, checking phone,
+     walking street, sitting desk, drinking coffee,
+     looking mirror, driving car, typing laptop,
+     running park, reading book, cooking kitchen.
+
+3. Format : 2 à 4 mots MAXIMUM.
+
+4. INTERDIT (concepts abstraits) :
+   - "brain power", "memory loss", "psychology",
+     "subconscious mind", "neural network", "cognitive bias",
+     "attention span", "dopamine release".
+   → Ces requêtes ne renvoient RIEN sur Pexels.
+
+5. TRADUIRE les concepts abstraits en action filmable :
+   - "memory loss" → "person forgetting keys"
+   - "attention span" → "student distracted phone"
+   - "dopamine" → "person eating chocolate"
+   - "neural network" → "doctor looking brain scan"
+   - "cognitive bias" → "person choosing options"
+   - "subconscious" → "person sleeping bed"
+
+6. Chaque scène DOIT avoir un visual_query DIFFÉRENT.
+   Pas de répétition d'une scène à l'autre.
+
+7. Varie les sujets (man, woman, person, kid, couple...)
+   pour éviter la répétition visuelle.
 
 ============================================================
 INTENSITY (1 à 5)
@@ -545,7 +547,6 @@ OBLIGATION :
 - Au moins 2 scènes à intensity 4.
 - Au moins 2 scènes à intensity 5.
 - Au moins 2 scènes à intensity 1.
-- JAMAIS 3 scènes consécutives de même intensity.
 
 ============================================================
 ÉMOTIONS
@@ -553,18 +554,6 @@ OBLIGATION :
 
 default, thinking, confused, laughing, explaining,
 surprised, angry, happy, shocked, sad.
-
-Associe cohéremment :
-- punchline drôle → "laughing" ou "happy"
-- révélation → "shocked" ou "surprised"
-- relance → "surprised" ou "thinking"
-- explication → "explaining" ou "default"
-
-============================================================
-PEXELS
-============================================================
-
-visual_query = anglais, 2 à 4 mots, action physique concrète.
 
 ============================================================
 TITRE / HASHTAGS
@@ -578,9 +567,8 @@ RÈGLE ABSOLUE
 ============================================================
 
 Si ta vidéo est plate → tu as échoué.
-Si tu n'as pas mis de relance → tu as échoué.
-Si tu n'as pas mis de punchline → tu as échoué.
-Si 3 scènes consécutives ont la même intensity → tu as échoué.
+Si un visual_query est abstrait → tu as échoué.
+Si deux scènes ont le même visual_query → tu as échoué.
 """
 
 
@@ -617,7 +605,7 @@ def clean_pexels_query(query: str) -> str:
 
 
 # ============================================================
-# NORMALISATION SCÈNE
+# NORMALISATION SCÈNE (v4 : plus de scene_hook_text)
 # ============================================================
 
 def normalize_scene(scene) -> Optional[Dict]:
@@ -635,12 +623,6 @@ def normalize_scene(scene) -> Optional[Dict]:
     visual_query = str(scene.get("visual_query", "person thinking")).strip()
     visual_query = clean_pexels_query(visual_query) or "person thinking"
 
-    scene_hook_text = str(scene.get("scene_hook_text", "")).strip()
-    scene_hook_text = re.sub(r"[^\w\sÀ-ÿ'\-]", "", scene_hook_text)
-    scene_hook_text = " ".join(scene_hook_text.split()[:4]).upper()
-    if not scene_hook_text:
-        scene_hook_text = "INFO"
-
     try:
         intensity = int(scene.get("intensity", 3))
     except (ValueError, TypeError):
@@ -653,7 +635,6 @@ def normalize_scene(scene) -> Optional[Dict]:
 
     return {
         "text": text,
-        "scene_hook_text": scene_hook_text[:40],
         "emotion": emotion,
         "intensity": intensity,
         "visual_query": visual_query[:80],
@@ -677,7 +658,7 @@ def split_multi_sentence_scenes(scenes: List[Dict]) -> List[Dict]:
             result.append(scene)
             continue
 
-        for i, part in enumerate(parts):
+        for part in parts:
             new_scene = dict(scene)
             new_scene["text"] = part
             result.append(new_scene)
@@ -686,14 +667,10 @@ def split_multi_sentence_scenes(scenes: List[Dict]) -> List[Dict]:
 
 
 # ============================================================
-# GARDE-FOU RYTHME (NOUVEAU v3)
+# GARDE-FOU RYTHME
 # ============================================================
 
 def enforce_rhythm_diversity(scenes: List[Dict]) -> List[Dict]:
-    """
-    Si 3 scènes consécutives ont la même intensity,
-    on force la variation sur la 3e.
-    """
     if len(scenes) < 3:
         return scenes
 
@@ -705,6 +682,27 @@ def enforce_rhythm_diversity(scenes: List[Dict]) -> List[Dict]:
         if a == b == c:
             new_intensity = 5 if a < 4 else 1
             scenes[i]["intensity"] = new_intensity
+
+    return scenes
+
+
+# ============================================================
+# GARDE-FOU VISUAL QUERY (v4 : anti-doublon visuel)
+# ============================================================
+
+def dedupe_visual_queries(scenes: List[Dict]) -> List[Dict]:
+    """
+    Empêche deux scènes consécutives d'avoir la même visual_query.
+    Si c'est le cas, on ajoute un mot variant.
+    """
+    fallback_variants = [
+        "person thinking", "man standing", "woman walking",
+        "person reading", "student studying", "person looking",
+    ]
+
+    for i in range(1, len(scenes)):
+        if scenes[i].get("visual_query") == scenes[i - 1].get("visual_query"):
+            scenes[i]["visual_query"] = random.choice(fallback_variants)
 
     return scenes
 
@@ -730,11 +728,9 @@ def validate_and_repair_script(data: Dict) -> Dict:
     if not normalized:
         raise RuntimeError("Script Gemini vide.")
 
-    # Découpage multi-phrases
     normalized = split_multi_sentence_scenes(normalized)
-
-    # Garde-fou de rythme
     normalized = enforce_rhythm_diversity(normalized)
+    normalized = dedupe_visual_queries(normalized)
 
     # INTRO
     first_text = normalized[0]["text"]
@@ -745,7 +741,6 @@ def validate_and_repair_script(data: Dict) -> Dict:
     normalized[-1]["text"] = CTA_SIGNATURE
     normalized[-1]["emotion"] = "happy"
     normalized[-1]["intensity"] = 5
-    normalized[-1]["scene_hook_text"] = "ABONNE-TOI"
     normalized[-1]["visual_query"] = "smiling person thumbs up"
 
     data["script_principal"] = normalized
@@ -759,6 +754,7 @@ def validate_and_repair_script(data: Dict) -> Dict:
             normalized_teaser.append(clean)
     normalized_teaser = split_multi_sentence_scenes(normalized_teaser)
     normalized_teaser = enforce_rhythm_diversity(normalized_teaser)
+    normalized_teaser = dedupe_visual_queries(normalized_teaser)
     data["script_teaser"] = normalized_teaser
 
     # FORMAT
@@ -823,14 +819,14 @@ Le script est trop court ({word_count} mots).
 Réécris-le pour atteindre {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots.
 Ajoute UNIQUEMENT : mécanisme, exemple, conséquence, nuance, explication.
 Ajoute au moins une relance courte et une punchline.
-Une phrase = une scène. Garde le scene_hook_text et l'intensity.
+Une phrase = une scène. Garde l'intensity ET le visual_query (action filmable).
 """
     else:
         instruction = f"""
 Le script est trop long ({word_count} mots).
 Réduis-le vers {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots.
 Supprime répétitions et digressions. Conserve faits, nuances, relances, punchlines.
-Une phrase = une scène. Garde le scene_hook_text et l'intensity.
+Une phrase = une scène. Garde l'intensity ET le visual_query (action filmable).
 """
 
     prompt = f"""
@@ -885,7 +881,7 @@ Durée : > 45 s, idéal 50-75 s, max 90 s.
 RAPPEL : une scène = UNE phrase.
 RAPPEL : relances + punchlines OBLIGATOIRES.
 RAPPEL : JAMAIS 3 scènes consécutives de même intensity.
-Chaque scène a scene_hook_text + intensity.
+RAPPEL : visual_query = action FILMABLE avec SUJET PHYSIQUE.
 
 Scène 1 : "{INTRO_SIGNATURE}" + hook.
 Dernière scène EXACTE : "{CTA_SIGNATURE}"
@@ -926,7 +922,7 @@ Vise 55-70 secondes. Script actuel :
 
 Ajoute uniquement : mécanisme, exemple, conséquence, nuance.
 Ajoute au moins une relance courte et une punchline.
-Une phrase = une scène.
+Une phrase = une scène. Garde visual_query filmable.
 Commence par "{INTRO_SIGNATURE}". Finis par "{CTA_SIGNATURE}".
 Format : {data.get("format_choisi", "short_single")}.
 """
@@ -941,7 +937,7 @@ Vise 55-75 secondes. Script actuel :
 
 Supprime répétitions et digressions. Garde le hook, les faits,
 les relances et les punchlines.
-Une phrase = une scène.
+Une phrase = une scène. Garde visual_query filmable.
 Commence par "{INTRO_SIGNATURE}". Finis par "{CTA_SIGNATURE}".
 Format : {data.get("format_choisi", "short_single")}.
 """
@@ -954,52 +950,143 @@ Format : {data.get("format_choisi", "short_single")}.
 
 
 # ============================================================
-# PEXELS
+# PEXELS (v4 — RENFORCÉ)
 # ============================================================
 
-def search_pexels_video(query: str, orientation: str) -> Optional[str]:
-    if not PEXELS_API_KEY:
-        return None
-
-    clean_query = clean_pexels_query(query) or "human thinking"
+def _pexels_fetch(query: str, orientation: str, per_page: int = 15):
+    """Appel brut à l'API Pexels. Retourne la liste de vidéos ou []."""
     url = "https://api.pexels.com/videos/search"
-    params = {"query": clean_query, "orientation": orientation, "per_page": 12}
+    params = {
+        "query": query,
+        "orientation": orientation,
+        "per_page": per_page,
+        "size": "medium",
+    }
     headers = {"Authorization": PEXELS_API_KEY}
 
     try:
-        r = requests.get(url, headers=headers, params=params, timeout=10)
+        r = requests.get(url, headers=headers, params=params, timeout=12)
         if r.status_code != 200:
-            return None
+            return []
+        return r.json().get("videos", []) or []
+    except Exception:
+        return []
 
-        videos = r.json().get("videos", [])
+
+def _select_best_link(video, orientation: str) -> Optional[str]:
+    """Retourne le meilleur lien vidéo disponible pour ce clip."""
+    files = video.get("video_files", []) or []
+    candidates = []
+
+    for fi in files:
+        link = fi.get("link")
+        if not link or ".mp4" not in str(link).lower():
+            continue
+        w = int(fi.get("width", 0) or 0)
+        h = int(fi.get("height", 0) or 0)
+        if w <= 0 or h <= 0:
+            continue
+
+        if orientation == "portrait":
+            # v4 : seuil assoupli à 480 (au lieu de 720)
+            if h < 480:
+                continue
+            if h <= w:
+                # On préfère le portrait, mais on accepte le carré
+                pass
+        else:
+            # v4 : seuil assoupli à 854 (au lieu de 1280)
+            if w < 854:
+                continue
+
+        # Score : privilégie la résolution proche de 1080p
+        # pour ne pas exploser le temps de traitement
+        ideal = 1920 * 1080
+        score = -abs(w * h - ideal)
+        candidates.append((score, w * h, link))
+
+    if not candidates:
+        return None
+
+    candidates.sort(reverse=True)
+    return candidates[0][2]
+
+
+def search_pexels_video(query: str, orientation: str,
+                        used_urls: Optional[set] = None) -> Optional[str]:
+    """
+    v4 : recherche Pexels robuste avec plusieurs tentatives :
+    1. Query nettoyée complète
+    2. Query raccourcie (2 premiers mots)
+    3. Query ultra-simple (1 mot fort)
+    4. Query de secours générique
+    Évite les URLs déjà utilisées si possible.
+    """
+    if not PEXELS_API_KEY:
+        return None
+
+    if used_urls is None:
+        used_urls = set()
+
+    clean_query = clean_pexels_query(query) or "person thinking"
+    words = clean_query.split()
+
+    # --------------------------------------------------------
+    # Construire les tentatives de recherche
+    # --------------------------------------------------------
+    attempts = [clean_query]
+
+    if len(words) >= 2:
+        attempts.append(" ".join(words[:2]))
+
+    if len(words) >= 3:
+        attempts.append(" ".join(words[:3]))
+
+    # Ajouter un mot physique si absent
+    physical_subjects = {"person", "man", "woman", "kid", "student",
+                         "couple", "family", "people", "boy", "girl"}
+    if not any(w in physical_subjects for w in words):
+        attempts.append("person " + words[0])
+
+    # Fallback générique
+    attempts.append("person thinking")
+    attempts.append("human lifestyle")
+
+    # Dédupliquer les tentatives
+    seen_attempts = set()
+    unique_attempts = []
+    for a in attempts:
+        if a and a not in seen_attempts:
+            seen_attempts.add(a)
+            unique_attempts.append(a)
+
+    # --------------------------------------------------------
+    # Essayer chaque tentative
+    # --------------------------------------------------------
+    for attempt_query in unique_attempts:
+        videos = _pexels_fetch(attempt_query, orientation, per_page=15)
+        if not videos:
+            continue
+
+        # Construire la liste des liens candidats
         candidates = []
-        for video in videos:
-            files = [
-                f for f in video.get("video_files", [])
-                if ".mp4" in str(f.get("link", "")).lower()
-            ]
-            for fi in files:
-                w = int(fi.get("width", 0) or 0)
-                h = int(fi.get("height", 0) or 0)
-                link = fi.get("link")
-                if not link:
-                    continue
-                if orientation == "portrait":
-                    if h < 720:
-                        continue
-                else:
-                    if w < 1280:
-                        continue
-                candidates.append((w * h, link))
+        for v in videos:
+            link = _select_best_link(v, orientation)
+            if link:
+                candidates.append(link)
 
         if not candidates:
-            return None
+            continue
 
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        top = candidates[:min(5, len(candidates))]
-        return random.choice(top)[1]
-    except Exception:
-        return None
+        # Éviter les doublons si possible
+        fresh = [c for c in candidates if c not in used_urls]
+        pool = fresh if fresh else candidates
+
+        # Choisir parmi les 3 meilleurs pour éviter la répétition
+        top = pool[:min(3, len(pool))]
+        return random.choice(top)
+
+    return None
 
 
 def download_file(url: str, dest: Path) -> bool:
@@ -1016,7 +1103,7 @@ def download_file(url: str, dest: Path) -> bool:
 
 
 # ============================================================
-# SOUS-TITRES ASS
+# SOUS-TITRES ASS (v4 : plus de hook jaune)
 # ============================================================
 
 def ass_time(seconds: float) -> str:
@@ -1030,18 +1117,18 @@ def ass_time(seconds: float) -> str:
 
 def create_ass_subtitles(scenes: List[Dict], output_ass: Path,
                           width: int, height: int):
+    """
+    v4 : Style Hook supprimé. Un seul style Default (karaoké blanc/jaune
+    sur le mot prononcé). Safe zone TikTok respectée.
+    """
     is_portrait = height > width
 
     if is_portrait:
         sub_fontsize = 72
-        hook_fontsize = 110
         sub_margin_v = int(height * 0.24)
-        hook_margin_v = int(height * 0.16)
     else:
         sub_fontsize = 48
-        hook_fontsize = 72
         sub_margin_v = 120
-        hook_margin_v = 80
 
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -1052,7 +1139,6 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,DejaVu Sans,{sub_fontsize},&H00FFFFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,3,2,40,40,{sub_margin_v},1
-Style: Hook,DejaVu Sans,{hook_fontsize},&H0000FFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,2,0,1,7,4,8,40,40,{hook_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -1067,20 +1153,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             str(scene.get("text", ""))
             .replace("\n", " ").replace("{", "").replace("}", "").strip()
         )
-        hook_text = str(scene.get("scene_hook_text", "")).strip()
 
         words = text.split()
         if not words:
             current_time += scene_duration
             continue
-
-        if hook_text:
-            hook_start = current_time + 0.05
-            hook_end = current_time + max(0.6, scene_duration * 0.60)
-            lines.append(
-                f"Dialogue: 0,{ass_time(hook_start)},{ass_time(hook_end)},"
-                f"Hook,,0,0,0,,{hook_text}"
-            )
 
         chunk_size = 4 if is_portrait else 5
         chunks = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
@@ -1098,6 +1175,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 for k, ww in enumerate(chunk_words):
                     safe_word = re.sub(r"[,.?!;:]", "", ww)
                     if k == idx_w:
+                        # Mot prononcé en jaune
                         formatted_words.append(
                             "{\\c&H00FFFF&}" + safe_word + "{\\c&HFFFFFF&}"
                         )
@@ -1294,13 +1372,16 @@ def add_nasheed_track(voice_audio, work_dir, status_cb=None):
 
 
 # ============================================================
-# VIDÉO PEXELS (v3 : Ken Burns + Fade mascotte)
+# VIDÉO PEXELS (v4 : mascotte optionnelle)
 # ============================================================
 
 def create_video_clip_from_pexels(visual_file, mascot_img, output_clip,
                                    duration, width, height, mascot_scale,
                                    pos_x, pos_y, enable_expr, work_dir,
                                    intensity=3):
+    """
+    v4 : si mascot_img est None → pas d'overlay mascotte.
+    """
     fps = 30
     total_frames = max(1, int(duration * fps))
 
@@ -1311,43 +1392,76 @@ def create_video_clip_from_pexels(visual_file, mascot_img, output_clip,
     fade_out_start = max(0.1, mascot_dur - 0.35)
     fade_out_d = 0.3
 
-    filter_complex = (
-        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
-        f"crop={width}:{height},"
-        f"fps={fps},setsar=1,"
-        f"zoompan=z='min(zoom+0.0006,{zoom_end})':"
-        f"d={total_frames}:"
-        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"s={width}x{height},"
-        "setsar=1[bg];"
+    if mascot_img is not None and Path(mascot_img).exists():
+        # ------------------------------------------------
+        # AVEC mascotte
+        # ------------------------------------------------
+        filter_complex = (
+            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},"
+            f"fps={fps},setsar=1,"
+            f"zoompan=z='min(zoom+0.0006,{zoom_end})':"
+            f"d={total_frames}:"
+            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"s={width}x{height},"
+            "setsar=1[bg];"
 
-        f"[1:v]scale={mascot_scale}:-1,format=rgba,"
-        f"fade=t=in:st=0:d={fade_in_d}:alpha=1,"
-        f"fade=t=out:st={fade_out_start}:d={fade_out_d}:alpha=1"
-        "[mascot];"
+            f"[1:v]scale={mascot_scale}:-1,format=rgba,"
+            f"fade=t=in:st=0:d={fade_in_d}:alpha=1,"
+            f"fade=t=out:st={fade_out_start}:d={fade_out_d}:alpha=1"
+            "[mascot];"
 
-        f"[bg][mascot]overlay=x={pos_x}:y={pos_y}:"
-        f"enable='{enable_expr}'[v_out]"
-    )
+            f"[bg][mascot]overlay=x={pos_x}:y={pos_y}:"
+            f"enable='{enable_expr}'[v_out]"
+        )
+        cmd = [
+            FFMPEG_BIN, "-y",
+            "-stream_loop", "-1", "-i", str(visual_file),
+            "-loop", "1", "-i", str(mascot_img.resolve()),
+            "-t", str(duration),
+            "-filter_complex", filter_complex,
+            "-map", "[v_out]", "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-r", str(fps),
+            "-movflags", "+faststart",
+            str(output_clip),
+        ]
+    else:
+        # ------------------------------------------------
+        # SANS mascotte
+        # ------------------------------------------------
+        filter_complex = (
+            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},"
+            f"fps={fps},setsar=1,"
+            f"zoompan=z='min(zoom+0.0006,{zoom_end})':"
+            f"d={total_frames}:"
+            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"s={width}x{height},"
+            "setsar=1[v_out]"
+        )
+        cmd = [
+            FFMPEG_BIN, "-y",
+            "-stream_loop", "-1", "-i", str(visual_file),
+            "-t", str(duration),
+            "-filter_complex", filter_complex,
+            "-map", "[v_out]", "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-r", str(fps),
+            "-movflags", "+faststart",
+            str(output_clip),
+        ]
 
-    cmd = [
-        FFMPEG_BIN, "-y",
-        "-stream_loop", "-1", "-i", str(visual_file),
-        "-loop", "1", "-i", str(mascot_img.resolve()),
-        "-t", str(duration),
-        "-filter_complex", filter_complex,
-        "-map", "[v_out]", "-an",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-pix_fmt", "yuv420p", "-r", str(fps),
-        "-movflags", "+faststart",
-        str(output_clip),
-    ]
     run_command(cmd, cwd=work_dir)
 
 
 def create_fallback_video_clip(output_clip, mascot_img, duration,
                                 width, height, mascot_scale, pos_x, pos_y,
                                 enable_expr, work_dir, intensity=3):
+    """
+    Fallback utilisé UNIQUEMENT si Pexels échoue totalement.
+    Fond coloré dégradé + mascotte optionnelle.
+    """
     fallback = work_dir / f"fallback_{output_clip.stem}.png"
     Image.new("RGB", (width, height), color=(20, 20, 35)).save(fallback)
 
@@ -1360,34 +1474,54 @@ def create_fallback_video_clip(output_clip, mascot_img, duration,
     fade_out_start = max(0.1, mascot_dur - 0.35)
     fade_out_d = 0.3
 
-    filter_complex = (
-        f"[0:v]scale={width}:{height},fps={fps},setsar=1,"
-        f"zoompan=z='min(zoom+0.0006,{zoom_end})':"
-        f"d={total_frames}:"
-        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"s={width}x{height},setsar=1[bg];"
+    if mascot_img is not None and Path(mascot_img).exists():
+        filter_complex = (
+            f"[0:v]scale={width}:{height},fps={fps},setsar=1,"
+            f"zoompan=z='min(zoom+0.0006,{zoom_end})':"
+            f"d={total_frames}:"
+            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"s={width}x{height},setsar=1[bg];"
 
-        f"[1:v]scale={mascot_scale}:-1,format=rgba,"
-        f"fade=t=in:st=0:d={fade_in_d}:alpha=1,"
-        f"fade=t=out:st={fade_out_start}:d={fade_out_d}:alpha=1"
-        "[mascot];"
+            f"[1:v]scale={mascot_scale}:-1,format=rgba,"
+            f"fade=t=in:st=0:d={fade_in_d}:alpha=1,"
+            f"fade=t=out:st={fade_out_start}:d={fade_out_d}:alpha=1"
+            "[mascot];"
 
-        f"[bg][mascot]overlay=x={pos_x}:y={pos_y}:"
-        f"enable='{enable_expr}'[v_out]"
-    )
+            f"[bg][mascot]overlay=x={pos_x}:y={pos_y}:"
+            f"enable='{enable_expr}'[v_out]"
+        )
+        cmd = [
+            FFMPEG_BIN, "-y",
+            "-loop", "1", "-i", str(fallback),
+            "-loop", "1", "-i", str(mascot_img.resolve()),
+            "-t", str(duration),
+            "-filter_complex", filter_complex,
+            "-map", "[v_out]", "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-r", str(fps),
+            "-movflags", "+faststart",
+            str(output_clip),
+        ]
+    else:
+        filter_complex = (
+            f"[0:v]scale={width}:{height},fps={fps},setsar=1,"
+            f"zoompan=z='min(zoom+0.0006,{zoom_end})':"
+            f"d={total_frames}:"
+            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"s={width}x{height},setsar=1[v_out]"
+        )
+        cmd = [
+            FFMPEG_BIN, "-y",
+            "-loop", "1", "-i", str(fallback),
+            "-t", str(duration),
+            "-filter_complex", filter_complex,
+            "-map", "[v_out]", "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-r", str(fps),
+            "-movflags", "+faststart",
+            str(output_clip),
+        ]
 
-    cmd = [
-        FFMPEG_BIN, "-y",
-        "-loop", "1", "-i", str(fallback),
-        "-loop", "1", "-i", str(mascot_img.resolve()),
-        "-t", str(duration),
-        "-filter_complex", filter_complex,
-        "-map", "[v_out]", "-an",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-pix_fmt", "yuv420p", "-r", str(fps),
-        "-movflags", "+faststart",
-        str(output_clip),
-    ]
     run_command(cmd, cwd=work_dir)
 
 
@@ -1407,6 +1541,18 @@ def generate_video_pipeline(script_scenes, video_format, status_cb):
 
     width, height = (1080, 1920) if video_format == "portrait" else (1920, 1080)
     orientation = "portrait" if video_format == "portrait" else "landscape"
+
+    # --------------------------------------------------------
+    # Vérification mascotte
+    # --------------------------------------------------------
+    mascot_available = has_any_mascot()
+
+    if not mascot_available:
+        status_cb(
+            "⚠️ Aucune mascotte détectée : la vidéo sera générée "
+            "sans overlay mascotte. Ajoute `mascot_default.png` "
+            "à la racine pour l'activer."
+        )
 
     # AUDIO
     status_cb("🎙️ Génération de la voix off...")
@@ -1436,9 +1582,21 @@ def generate_video_pipeline(script_scenes, video_format, status_cb):
             )
         status_cb(f"✅ Durée validée : {voice_duration:.1f} s")
 
+    # --------------------------------------------------------
+    # Vérification clé Pexels
+    # --------------------------------------------------------
+    if not PEXELS_API_KEY:
+        status_cb(
+            "⚠️ PEXELS_API_KEY manquante → fallback fond coloré. "
+            "Ajoute la clé dans les secrets Streamlit."
+        )
+
     # RECHERCHE PEXELS
-    status_cb("🎥 Recherche des clips Pexels...")
+    status_cb("🎥 Recherche des clips vidéo Pexels...")
     video_clips = []
+    used_urls = set()
+    pexels_success = 0
+    pexels_fail = 0
 
     if video_format == "portrait":
         mascot_scale = int(width * 0.19)
@@ -1460,15 +1618,20 @@ def generate_video_pipeline(script_scenes, video_format, status_cb):
         intensity = int(scene.get("intensity", 3))
         emotion = scene.get("emotion", "default")
 
-        mascot_img = MASCOT_FILES.get(emotion, MASCOT_FILES["default"])
-        if not mascot_img.exists():
-            mascot_img = MASCOT_FILES["default"]
+        # ▼ Mascotte optionnelle
+        if mascot_available:
+            mascot_img = MASCOT_FILES.get(emotion, MASCOT_FILES["default"])
+            if not mascot_img.exists():
+                mascot_img = MASCOT_FILES["default"]
+            if not mascot_img.exists():
+                mascot_img = None
+        else:
+            mascot_img = None
 
-        status_cb(f"🎬 Clip {idx+1}/{total_scenes} : {scene.get('visual_query','')}")
+        query = scene.get("visual_query", "person thinking")
+        status_cb(f"🎬 Clip {idx+1}/{total_scenes} : {query}")
 
-        url = search_pexels_video(
-            scene.get("visual_query", "person thinking"), orientation
-        )
+        url = search_pexels_video(query, orientation, used_urls=used_urls)
 
         visual_file = work_dir / f"src_vis_{idx:03d}.mp4"
         output_clip = work_dir / f"clip_{idx:03d}.mp4"
@@ -1478,12 +1641,16 @@ def generate_video_pipeline(script_scenes, video_format, status_cb):
         enable_expr = f"between(t,0,{mascot_duration})"
 
         if url and download_file(url, visual_file):
+            used_urls.add(url)
+            pexels_success += 1
             create_video_clip_from_pexels(
                 visual_file, mascot_img, output_clip, duration,
                 width, height, mascot_scale, pos_x, pos_y,
                 enable_expr, work_dir, intensity=intensity,
             )
         else:
+            pexels_fail += 1
+            status_cb(f"⚠️ Fallback pour clip {idx+1} (aucune vidéo trouvée)")
             create_fallback_video_clip(
                 output_clip, mascot_img, duration,
                 width, height, mascot_scale, pos_x, pos_y,
@@ -1491,6 +1658,20 @@ def generate_video_pipeline(script_scenes, video_format, status_cb):
             )
 
         video_clips.append(output_clip)
+
+    # --------------------------------------------------------
+    # Bilan Pexels
+    # --------------------------------------------------------
+    status_cb(
+        f"📊 Pexels : {pexels_success} clips trouvés, "
+        f"{pexels_fail} fallbacks"
+    )
+
+    if pexels_success == 0 and PEXELS_API_KEY:
+        status_cb(
+            "⚠️ Aucun clip Pexels n'a été trouvé. "
+            "Vérifie ta clé API et les visual_query."
+        )
 
     # CONCAT
     status_cb("⚡ Fusion des scènes...")
@@ -1510,7 +1691,7 @@ def generate_video_pipeline(script_scenes, video_format, status_cb):
         ], cwd=work_dir)
 
     # SOUS-TITRES
-    status_cb("💬 Sous-titres karaoké + overlays...")
+    status_cb("💬 Sous-titres karaoké...")
     subtitles_file = work_dir / "subtitles.ass"
     create_ass_subtitles(script_scenes, subtitles_file, width, height)
 
@@ -1679,7 +1860,7 @@ def render_results():
                 script_complet += (
                     f"Scène {idx+1} "
                     f"[{scene.get('emotion','')} • int {scene.get('intensity',3)}] :\n"
-                    f"  HOOK: {scene.get('scene_hook_text','')}\n"
+                    f"  VISUEL: {scene.get('visual_query','')}\n"
                     f"  TEXTE: {scene.get('text','')}\n\n"
                 )
             st.code(script_complet, language="text")
@@ -1810,12 +1991,34 @@ def main():
             "<h3 style='text-align:center;'>Tableau de bord</h3>",
             unsafe_allow_html=True,
         )
+
+        # ▼ Mascotte uniquement si elle existe
         if MASCOT_FILES["default"].exists():
             st.image(str(MASCOT_FILES["default"]), use_container_width=True)
+            st.caption("✅ Mascotte active")
+        else:
+            st.warning("⚠️ Aucune mascotte détectée")
+            st.caption(
+                "Ajoute `mascot_default.png` à la racine "
+                "pour activer l'overlay mascotte."
+            )
 
         st.markdown("---")
         st.markdown("🎯 **Mode Autonome Actif**")
         st.write("Gemini + Edge-TTS + Pexels + FFmpeg.")
+
+        # ▼ Statut Pexels
+        st.markdown("---")
+        st.markdown("### 🎥 Vidéo")
+        if PEXELS_API_KEY:
+            st.success("Pexels : connecté")
+        else:
+            st.error("Pexels : clé manquante")
+            st.caption(
+                "Ajoute `PEXELS_API_KEY` dans les secrets "
+                "Streamlit pour activer les clips vidéo."
+            )
+
         st.markdown("---")
         st.markdown("### 🎵 Audio")
 
@@ -1836,7 +2039,7 @@ def main():
         st.markdown("---")
         st.caption("Signature : Wesh l'équipe")
         st.caption("Short > 45 s • limite 90 s")
-        st.caption("✨ v3 Viral Edition")
+        st.caption("✨ v4 Clean Video Edition")
 
     st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>',
                 unsafe_allow_html=True)
