@@ -1,5 +1,6 @@
 # ============================================================
-# CERVEAU CURIEUX — STUDIO IA AUTONOME (v4 — Clean Video Edition)
+# CERVEAU CURIEUX — STUDIO IA AUTONOME (v5 — Free Video Edition)
+# Pexels + Pixabay uniquement (100 % gratuit)
 # ============================================================
 
 import os
@@ -46,6 +47,7 @@ def get_secret(name: str) -> str:
 
 
 PEXELS_API_KEY = get_secret("PEXELS_API_KEY")
+PIXABAY_API_KEY = get_secret("PIXABAY_API_KEY")
 GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
 
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
@@ -142,10 +144,6 @@ MASCOT_FILES = {
     "sad":        BASE_DIR / "mascot_sad.png",
 }
 
-# ▼ v4 : plus de PNG transparent vide créé automatiquement.
-# Si aucune mascotte n'existe → pas d'overlay mascotte.
-# L'utilisateur est prévenu dans la sidebar Streamlit.
-
 
 def has_any_mascot() -> bool:
     return any(p.exists() for p in MASCOT_FILES.values())
@@ -164,7 +162,7 @@ class ShortTooLongError(RuntimeError):
 
 
 # ============================================================
-# SCHÉMA JSON GEMINI (v4 : plus de scene_hook_text)
+# SCHÉMA JSON GEMINI
 # ============================================================
 
 class Scene(BaseModel):
@@ -199,8 +197,7 @@ class Scene(BaseModel):
             "(person, man, woman, kid, couple, student...). "
             "Ex: 'person opening door', 'man rubbing eyes', "
             "'woman checking phone', 'student studying desk'. "
-            "JAMAIS de concept abstrait comme 'memory', "
-            "'brain power', 'psychology'."
+            "JAMAIS de concept abstrait."
         )
     )
 
@@ -380,7 +377,7 @@ def generate_tts(text: str, output_path: Path, emotion: str = "default",
 
 
 # ============================================================
-# PROMPT GEMINI (v4 — Visual Query renforcé)
+# PROMPT GEMINI
 # ============================================================
 
 SYSTEM_PROMPT = f"""
@@ -497,27 +494,26 @@ VISUAL_QUERY — RÈGLE ABSOLUE (CRITIQUE)
 ============================================================
 
 Le visual_query sera utilisé pour chercher une VRAIE VIDÉO
-sur Pexels. Il DOIT décrire une action filmable par une caméra.
+sur Pexels ou Pixabay. Il DOIT décrire une action filmable.
 
 RÈGLES STRICTES :
 
 1. Il DOIT contenir un SUJET PHYSIQUE visible :
-   - person, man, woman, kid, student, couple, family,
-     doctor, worker, athlete, driver, cook, teacher.
+   person, man, woman, kid, student, couple, family,
+   doctor, worker, athlete, driver, cook, teacher.
 
 2. Il DOIT décrire une ACTION ou une SITUATION CONCRÈTE :
-   - opening door, rubbing eyes, checking phone,
-     walking street, sitting desk, drinking coffee,
-     looking mirror, driving car, typing laptop,
-     running park, reading book, cooking kitchen.
+   opening door, rubbing eyes, checking phone,
+   walking street, sitting desk, drinking coffee,
+   looking mirror, driving car, typing laptop,
+   running park, reading book, cooking kitchen.
 
 3. Format : 2 à 4 mots MAXIMUM.
 
 4. INTERDIT (concepts abstraits) :
-   - "brain power", "memory loss", "psychology",
-     "subconscious mind", "neural network", "cognitive bias",
-     "attention span", "dopamine release".
-   → Ces requêtes ne renvoient RIEN sur Pexels.
+   "brain power", "memory loss", "psychology",
+   "subconscious mind", "neural network", "cognitive bias".
+   → Ces requêtes ne renvoient RIEN.
 
 5. TRADUIRE les concepts abstraits en action filmable :
    - "memory loss" → "person forgetting keys"
@@ -528,10 +524,8 @@ RÈGLES STRICTES :
    - "subconscious" → "person sleeping bed"
 
 6. Chaque scène DOIT avoir un visual_query DIFFÉRENT.
-   Pas de répétition d'une scène à l'autre.
 
-7. Varie les sujets (man, woman, person, kid, couple...)
-   pour éviter la répétition visuelle.
+7. Varie les sujets (man, woman, person, kid, couple...).
 
 ============================================================
 INTENSITY (1 à 5)
@@ -605,7 +599,7 @@ def clean_pexels_query(query: str) -> str:
 
 
 # ============================================================
-# NORMALISATION SCÈNE (v4 : plus de scene_hook_text)
+# NORMALISATION SCÈNE
 # ============================================================
 
 def normalize_scene(scene) -> Optional[Dict]:
@@ -687,14 +681,10 @@ def enforce_rhythm_diversity(scenes: List[Dict]) -> List[Dict]:
 
 
 # ============================================================
-# GARDE-FOU VISUAL QUERY (v4 : anti-doublon visuel)
+# GARDE-FOU VISUAL QUERY
 # ============================================================
 
 def dedupe_visual_queries(scenes: List[Dict]) -> List[Dict]:
-    """
-    Empêche deux scènes consécutives d'avoir la même visual_query.
-    Si c'est le cas, on ajoute un mot variant.
-    """
     fallback_variants = [
         "person thinking", "man standing", "woman walking",
         "person reading", "student studying", "person looking",
@@ -819,14 +809,14 @@ Le script est trop court ({word_count} mots).
 Réécris-le pour atteindre {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots.
 Ajoute UNIQUEMENT : mécanisme, exemple, conséquence, nuance, explication.
 Ajoute au moins une relance courte et une punchline.
-Une phrase = une scène. Garde l'intensity ET le visual_query (action filmable).
+Une phrase = une scène. Garde l'intensity ET le visual_query filmable.
 """
     else:
         instruction = f"""
 Le script est trop long ({word_count} mots).
 Réduis-le vers {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots.
 Supprime répétitions et digressions. Conserve faits, nuances, relances, punchlines.
-Une phrase = une scène. Garde l'intensity ET le visual_query (action filmable).
+Une phrase = une scène. Garde l'intensity ET le visual_query filmable.
 """
 
     prompt = f"""
@@ -950,143 +940,131 @@ Format : {data.get("format_choisi", "short_single")}.
 
 
 # ============================================================
-# PEXELS (v4 — RENFORCÉ)
+# PEXELS (v5 — BUG CORRIGÉ : plus de size=medium)
 # ============================================================
-
-def _pexels_fetch(query: str, orientation: str, per_page: int = 15):
-    """Appel brut à l'API Pexels. Retourne la liste de vidéos ou []."""
-    url = "https://api.pexels.com/videos/search"
-    params = {
-        "query": query,
-        "orientation": orientation,
-        "per_page": per_page,
-        "size": "medium",
-    }
-    headers = {"Authorization": PEXELS_API_KEY}
-
-    try:
-        r = requests.get(url, headers=headers, params=params, timeout=12)
-        if r.status_code != 200:
-            return []
-        return r.json().get("videos", []) or []
-    except Exception:
-        return []
-
-
-def _select_best_link(video, orientation: str) -> Optional[str]:
-    """Retourne le meilleur lien vidéo disponible pour ce clip."""
-    files = video.get("video_files", []) or []
-    candidates = []
-
-    for fi in files:
-        link = fi.get("link")
-        if not link or ".mp4" not in str(link).lower():
-            continue
-        w = int(fi.get("width", 0) or 0)
-        h = int(fi.get("height", 0) or 0)
-        if w <= 0 or h <= 0:
-            continue
-
-        if orientation == "portrait":
-            # v4 : seuil assoupli à 480 (au lieu de 720)
-            if h < 480:
-                continue
-            if h <= w:
-                # On préfère le portrait, mais on accepte le carré
-                pass
-        else:
-            # v4 : seuil assoupli à 854 (au lieu de 1280)
-            if w < 854:
-                continue
-
-        # Score : privilégie la résolution proche de 1080p
-        # pour ne pas exploser le temps de traitement
-        ideal = 1920 * 1080
-        score = -abs(w * h - ideal)
-        candidates.append((score, w * h, link))
-
-    if not candidates:
-        return None
-
-    candidates.sort(reverse=True)
-    return candidates[0][2]
-
 
 def search_pexels_video(query: str, orientation: str,
                         used_urls: Optional[set] = None) -> Optional[str]:
-    """
-    v4 : recherche Pexels robuste avec plusieurs tentatives :
-    1. Query nettoyée complète
-    2. Query raccourcie (2 premiers mots)
-    3. Query ultra-simple (1 mot fort)
-    4. Query de secours générique
-    Évite les URLs déjà utilisées si possible.
-    """
     if not PEXELS_API_KEY:
         return None
-
     if used_urls is None:
         used_urls = set()
 
-    clean_query = clean_pexels_query(query) or "person thinking"
-    words = clean_query.split()
+    clean_query = clean_pexels_query(query) or "human thinking"
+    url = "https://api.pexels.com/videos/search"
+    headers = {"Authorization": PEXELS_API_KEY}
 
-    # --------------------------------------------------------
-    # Construire les tentatives de recherche
-    # --------------------------------------------------------
     attempts = [clean_query]
-
-    if len(words) >= 2:
-        attempts.append(" ".join(words[:2]))
-
+    words = clean_query.split()
     if len(words) >= 3:
-        attempts.append(" ".join(words[:3]))
-
-    # Ajouter un mot physique si absent
-    physical_subjects = {"person", "man", "woman", "kid", "student",
-                         "couple", "family", "people", "boy", "girl"}
-    if not any(w in physical_subjects for w in words):
-        attempts.append("person " + words[0])
-
-    # Fallback générique
+        attempts.append(" ".join(words[:2]))
     attempts.append("person thinking")
-    attempts.append("human lifestyle")
 
-    # Dédupliquer les tentatives
-    seen_attempts = set()
-    unique_attempts = []
-    for a in attempts:
-        if a and a not in seen_attempts:
-            seen_attempts.add(a)
-            unique_attempts.append(a)
+    for attempt in attempts:
+        try:
+            r = requests.get(
+                url, headers=headers,
+                params={
+                    "query": attempt,
+                    "orientation": orientation,
+                    "per_page": 15,
+                },
+                timeout=12,
+            )
+            if r.status_code != 200:
+                continue
 
-    # --------------------------------------------------------
-    # Essayer chaque tentative
-    # --------------------------------------------------------
-    for attempt_query in unique_attempts:
-        videos = _pexels_fetch(attempt_query, orientation, per_page=15)
-        if not videos:
+            videos = r.json().get("videos", [])
+            candidates = []
+
+            for video in videos:
+                for fi in video.get("video_files", []):
+                    link = fi.get("link")
+                    if not link or ".mp4" not in str(link).lower():
+                        continue
+                    w = int(fi.get("width", 0) or 0)
+                    h = int(fi.get("height", 0) or 0)
+                    if w <= 0 or h <= 0:
+                        continue
+                    if orientation == "portrait" and h < 720:
+                        continue
+                    if orientation == "landscape" and w < 1280:
+                        continue
+                    candidates.append((w * h, link))
+
+            if not candidates:
+                continue
+
+            fresh = [c for c in candidates if c[1] not in used_urls]
+            pool = fresh if fresh else candidates
+            pool.sort(reverse=True)
+            top = pool[:min(5, len(pool))]
+            return random.choice(top)[1]
+
+        except Exception:
             continue
-
-        # Construire la liste des liens candidats
-        candidates = []
-        for v in videos:
-            link = _select_best_link(v, orientation)
-            if link:
-                candidates.append(link)
-
-        if not candidates:
-            continue
-
-        # Éviter les doublons si possible
-        fresh = [c for c in candidates if c not in used_urls]
-        pool = fresh if fresh else candidates
-
-        # Choisir parmi les 3 meilleurs pour éviter la répétition
-        top = pool[:min(3, len(pool))]
-        return random.choice(top)
 
     return None
+
+
+# ============================================================
+# PIXABAY (source secondaire gratuite)
+# ============================================================
+
+def search_pixabay_video(query: str, orientation: str,
+                          used_urls: Optional[set] = None) -> Optional[str]:
+    if not PIXABAY_API_KEY:
+        return None
+    if used_urls is None:
+        used_urls = set()
+
+    clean_query = clean_pexels_query(query) or "human thinking"
+    orientation_param = "vertical" if orientation == "portrait" else "horizontal"
+
+    url = "https://pixabay.com/api/videos/"
+    params = {
+        "key": PIXABAY_API_KEY,
+        "q": clean_query,
+        "video_type": "film",
+        "orientation": orientation_param,
+        "per_page": 20,
+        "safesearch": "true",
+    }
+
+    try:
+        r = requests.get(url, params=params, timeout=12)
+        if r.status_code != 200:
+            return None
+        hits = r.json().get("hits", [])
+        candidates = []
+
+        for hit in hits:
+            videos = hit.get("videos", {})
+            for quality in ["large", "medium", "small"]:
+                v = videos.get(quality)
+                if not v:
+                    continue
+                link = v.get("url")
+                if not link:
+                    continue
+                w = int(v.get("width", 0) or 0)
+                h = int(v.get("height", 0) or 0)
+                if w <= 0 or h <= 0:
+                    continue
+                candidates.append((w * h, link))
+                break
+
+        if not candidates:
+            return None
+
+        fresh = [c for c in candidates if c[1] not in used_urls]
+        pool = fresh if fresh else candidates
+        pool.sort(reverse=True)
+        top = pool[:min(5, len(pool))]
+        return random.choice(top)[1]
+
+    except Exception:
+        return None
 
 
 def download_file(url: str, dest: Path) -> bool:
@@ -1103,7 +1081,7 @@ def download_file(url: str, dest: Path) -> bool:
 
 
 # ============================================================
-# SOUS-TITRES ASS (v4 : plus de hook jaune)
+# SOUS-TITRES ASS
 # ============================================================
 
 def ass_time(seconds: float) -> str:
@@ -1117,10 +1095,6 @@ def ass_time(seconds: float) -> str:
 
 def create_ass_subtitles(scenes: List[Dict], output_ass: Path,
                           width: int, height: int):
-    """
-    v4 : Style Hook supprimé. Un seul style Default (karaoké blanc/jaune
-    sur le mot prononcé). Safe zone TikTok respectée.
-    """
     is_portrait = height > width
 
     if is_portrait:
@@ -1175,7 +1149,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 for k, ww in enumerate(chunk_words):
                     safe_word = re.sub(r"[,.?!;:]", "", ww)
                     if k == idx_w:
-                        # Mot prononcé en jaune
                         formatted_words.append(
                             "{\\c&H00FFFF&}" + safe_word + "{\\c&HFFFFFF&}"
                         )
@@ -1372,16 +1345,13 @@ def add_nasheed_track(voice_audio, work_dir, status_cb=None):
 
 
 # ============================================================
-# VIDÉO PEXELS (v4 : mascotte optionnelle)
+# VIDÉO PEXELS
 # ============================================================
 
 def create_video_clip_from_pexels(visual_file, mascot_img, output_clip,
                                    duration, width, height, mascot_scale,
                                    pos_x, pos_y, enable_expr, work_dir,
                                    intensity=3):
-    """
-    v4 : si mascot_img est None → pas d'overlay mascotte.
-    """
     fps = 30
     total_frames = max(1, int(duration * fps))
 
@@ -1393,9 +1363,6 @@ def create_video_clip_from_pexels(visual_file, mascot_img, output_clip,
     fade_out_d = 0.3
 
     if mascot_img is not None and Path(mascot_img).exists():
-        # ------------------------------------------------
-        # AVEC mascotte
-        # ------------------------------------------------
         filter_complex = (
             f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},"
@@ -1427,9 +1394,6 @@ def create_video_clip_from_pexels(visual_file, mascot_img, output_clip,
             str(output_clip),
         ]
     else:
-        # ------------------------------------------------
-        # SANS mascotte
-        # ------------------------------------------------
         filter_complex = (
             f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},"
@@ -1458,10 +1422,6 @@ def create_video_clip_from_pexels(visual_file, mascot_img, output_clip,
 def create_fallback_video_clip(output_clip, mascot_img, duration,
                                 width, height, mascot_scale, pos_x, pos_y,
                                 enable_expr, work_dir, intensity=3):
-    """
-    Fallback utilisé UNIQUEMENT si Pexels échoue totalement.
-    Fond coloré dégradé + mascotte optionnelle.
-    """
     fallback = work_dir / f"fallback_{output_clip.stem}.png"
     Image.new("RGB", (width, height), color=(20, 20, 35)).save(fallback)
 
@@ -1526,7 +1486,7 @@ def create_fallback_video_clip(output_clip, mascot_img, duration,
 
 
 # ============================================================
-# PIPELINE VIDÉO
+# PIPELINE VIDÉO (v5 — cascade Pexels → Pixabay)
 # ============================================================
 
 def generate_video_pipeline(script_scenes, video_format, status_cb):
@@ -1542,16 +1502,11 @@ def generate_video_pipeline(script_scenes, video_format, status_cb):
     width, height = (1080, 1920) if video_format == "portrait" else (1920, 1080)
     orientation = "portrait" if video_format == "portrait" else "landscape"
 
-    # --------------------------------------------------------
-    # Vérification mascotte
-    # --------------------------------------------------------
     mascot_available = has_any_mascot()
 
     if not mascot_available:
         status_cb(
-            "⚠️ Aucune mascotte détectée : la vidéo sera générée "
-            "sans overlay mascotte. Ajoute `mascot_default.png` "
-            "à la racine pour l'activer."
+            "⚠️ Aucune mascotte détectée : vidéo générée sans overlay mascotte."
         )
 
     # AUDIO
@@ -1582,21 +1537,20 @@ def generate_video_pipeline(script_scenes, video_format, status_cb):
             )
         status_cb(f"✅ Durée validée : {voice_duration:.1f} s")
 
-    # --------------------------------------------------------
-    # Vérification clé Pexels
-    # --------------------------------------------------------
-    if not PEXELS_API_KEY:
-        status_cb(
-            "⚠️ PEXELS_API_KEY manquante → fallback fond coloré. "
-            "Ajoute la clé dans les secrets Streamlit."
-        )
+    # Statut sources
+    if PEXELS_API_KEY:
+        status_cb("🎬 Source vidéo : Pexels (primaire)")
+    if PIXABAY_API_KEY:
+        status_cb("🎬 Source vidéo : Pixabay (secondaire)")
+    if not PEXELS_API_KEY and not PIXABAY_API_KEY:
+        status_cb("⚠️ Aucune clé API vidéo → fallback fond coloré")
 
-    # RECHERCHE PEXELS
-    status_cb("🎥 Recherche des clips vidéo Pexels...")
+    # RECHERCHE VIDÉOS
+    status_cb("🎥 Recherche des clips vidéo...")
     video_clips = []
     used_urls = set()
-    pexels_success = 0
-    pexels_fail = 0
+    video_success = 0
+    video_fail = 0
 
     if video_format == "portrait":
         mascot_scale = int(width * 0.19)
@@ -1618,7 +1572,6 @@ def generate_video_pipeline(script_scenes, video_format, status_cb):
         intensity = int(scene.get("intensity", 3))
         emotion = scene.get("emotion", "default")
 
-        # ▼ Mascotte optionnelle
         if mascot_available:
             mascot_img = MASCOT_FILES.get(emotion, MASCOT_FILES["default"])
             if not mascot_img.exists():
@@ -1631,8 +1584,6 @@ def generate_video_pipeline(script_scenes, video_format, status_cb):
         query = scene.get("visual_query", "person thinking")
         status_cb(f"🎬 Clip {idx+1}/{total_scenes} : {query}")
 
-        url = search_pexels_video(query, orientation, used_urls=used_urls)
-
         visual_file = work_dir / f"src_vis_{idx:03d}.mp4"
         output_clip = work_dir / f"clip_{idx:03d}.mp4"
         pos_x, pos_y = mascot_positions[idx % len(mascot_positions)]
@@ -1640,17 +1591,34 @@ def generate_video_pipeline(script_scenes, video_format, status_cb):
         mascot_duration = min(2.5, duration)
         enable_expr = f"between(t,0,{mascot_duration})"
 
-        if url and download_file(url, visual_file):
-            used_urls.add(url)
-            pexels_success += 1
+        got_clip = False
+
+        # 1. Pexels
+        if PEXELS_API_KEY and not got_clip:
+            url = search_pexels_video(query, orientation, used_urls=used_urls)
+            if url and download_file(url, visual_file):
+                used_urls.add(url)
+                got_clip = True
+                video_success += 1
+
+        # 2. Pixabay (si Pexels échoue)
+        if PIXABAY_API_KEY and not got_clip:
+            url = search_pixabay_video(query, orientation, used_urls=used_urls)
+            if url and download_file(url, visual_file):
+                used_urls.add(url)
+                got_clip = True
+                video_success += 1
+
+        # 3. Rendu
+        if got_clip:
             create_video_clip_from_pexels(
                 visual_file, mascot_img, output_clip, duration,
                 width, height, mascot_scale, pos_x, pos_y,
                 enable_expr, work_dir, intensity=intensity,
             )
         else:
-            pexels_fail += 1
-            status_cb(f"⚠️ Fallback pour clip {idx+1} (aucune vidéo trouvée)")
+            video_fail += 1
+            status_cb(f"⚠️ Fallback clip {idx+1} (aucune vidéo trouvée)")
             create_fallback_video_clip(
                 output_clip, mascot_img, duration,
                 width, height, mascot_scale, pos_x, pos_y,
@@ -1659,18 +1627,13 @@ def generate_video_pipeline(script_scenes, video_format, status_cb):
 
         video_clips.append(output_clip)
 
-    # --------------------------------------------------------
-    # Bilan Pexels
-    # --------------------------------------------------------
-    status_cb(
-        f"📊 Pexels : {pexels_success} clips trouvés, "
-        f"{pexels_fail} fallbacks"
-    )
+    # Bilan
+    status_cb(f"📊 Vidéos : {video_success} clips trouvés, {video_fail} fallbacks")
 
-    if pexels_success == 0 and PEXELS_API_KEY:
+    if video_success == 0:
         status_cb(
-            "⚠️ Aucun clip Pexels n'a été trouvé. "
-            "Vérifie ta clé API et les visual_query."
+            "⚠️ Aucun clip vidéo trouvé. Vérifie tes clés API "
+            "(Pexels / Pixabay) dans les secrets Streamlit."
         )
 
     # CONCAT
@@ -1992,7 +1955,6 @@ def main():
             unsafe_allow_html=True,
         )
 
-        # ▼ Mascotte uniquement si elle existe
         if MASCOT_FILES["default"].exists():
             st.image(str(MASCOT_FILES["default"]), use_container_width=True)
             st.caption("✅ Mascotte active")
@@ -2005,19 +1967,22 @@ def main():
 
         st.markdown("---")
         st.markdown("🎯 **Mode Autonome Actif**")
-        st.write("Gemini + Edge-TTS + Pexels + FFmpeg.")
+        st.write("Gemini + Edge-TTS + Pexels + Pixabay + FFmpeg.")
 
-        # ▼ Statut Pexels
         st.markdown("---")
         st.markdown("### 🎥 Vidéo")
+
         if PEXELS_API_KEY:
             st.success("Pexels : connecté")
         else:
             st.error("Pexels : clé manquante")
-            st.caption(
-                "Ajoute `PEXELS_API_KEY` dans les secrets "
-                "Streamlit pour activer les clips vidéo."
-            )
+            st.caption("Ajoute `PEXELS_API_KEY` dans les secrets.")
+
+        if PIXABAY_API_KEY:
+            st.success("Pixabay : connecté")
+        else:
+            st.info("Pixabay : non configuré (optionnel)")
+            st.caption("Ajoute `PIXABAY_API_KEY` pour la source secondaire.")
 
         st.markdown("---")
         st.markdown("### 🎵 Audio")
@@ -2039,7 +2004,7 @@ def main():
         st.markdown("---")
         st.caption("Signature : Wesh l'équipe")
         st.caption("Short > 45 s • limite 90 s")
-        st.caption("✨ v4 Clean Video Edition")
+        st.caption("✨ v5 Free Video Edition")
 
     st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>',
                 unsafe_allow_html=True)
