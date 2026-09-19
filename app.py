@@ -684,7 +684,8 @@ def render_results():
             st.code("".join(f"Scène {idx + 1} : {scene.get('text', '')}\n\n" for idx, scene in enumerate(ai_data.get("script_principal", []))), language="text")
 
     with video_tab:
-        paths = [Path(str(x))] if format_choisi == "short_single" else [Path(str(x)) for x in video_path]
+        # CORRECTION : video_path utilisé à la place de x
+        paths = [Path(str(video_path))] if format_choisi == "short_single" else [Path(str(x)) for x in video_path]
         if format_choisi == "short_twoparts":
             col1, col2 = st.columns(2)
             for col, p, name in zip([col1, col2], paths, ["Partie 1", "Partie 2"]):
