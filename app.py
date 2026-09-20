@@ -96,7 +96,6 @@ MASCOT_FILES = {
 if not MASCOT_FILES["default"].exists():
     Image.new("RGBA", (200, 200), color=(0, 0, 0, 0)).save(MASCOT_FILES["default"])
 
-# NOUVEAU : Emojis d'effets sonores (Stickers)
 CUSTOM_EMOJIS = {
     "sfx_boom": BASE_DIR / "emoji_boom.png",
     "sfx_glitch": BASE_DIR / "emoji_glitch.png",
@@ -118,13 +117,13 @@ class ShortTooLongError(RuntimeError): pass
 
 
 # ============================================================
-# SCHÉMA JSON GEMINI
+# SCHÉMA JSON GEMINI (AMÉLIORÉ POUR L'ACTION)
 # ============================================================
 
 class Scene(BaseModel):
     text: str = Field(description="Une seule phrase courte de narration. Ton moderne, jeune, urbain et naturel.")
     emotion: str = Field(description="Émotion de la mascotte parmi: default, thinking, confused, laughing, explaining, surprised, angry, happy, shocked, sad")
-    visual_query: str = Field(description="Mots-clés visuels en anglais, 2 à 4 mots, décrivant une action physique concrète facile à trouver sur Pexels.")
+    visual_query: str = Field(description="Mots-clés visuels en anglais, 2 à 4 mots. DOIT décrire l'ACTION PHYSIQUE EXACTE (ex: 'person tripping', 'falling down', 'spilling coffee'). Interdit d'utiliser des mots abstraits comme 'street' ou 'mind'.")
     sfx: str = Field(default="", description="Nom exact du bruitage. Options: sfx_boom, sfx_glitch, sfx_siren, sfx_punch, sfx_cricket, sfx_laugh, sfx_whoosh, sfx_pop, sfx_ding. Laisse vide si aucun bruitage.")
 
 class ScriptOutput(BaseModel):
@@ -136,7 +135,7 @@ class ScriptOutput(BaseModel):
 
 
 # ============================================================
-# PROMPT GEMINI (AMÉLIORÉ)
+# PROMPT GEMINI (AMÉLIORÉ POUR LA COHÉRENCE VISUELLE)
 # ============================================================
 
 SYSTEM_PROMPT = """
@@ -145,28 +144,26 @@ OBJECTIF : Créer des vidéos virales, humoristiques, dynamiques et documentées
 
 ACCROCHE (HOOK) IMMÉDIATE :
 - Ne fais AUCUNE salutation (INTERDIT : "Wesh l'équipe", "Bonjour", etc.).
-- Attaque DIRECTEMENT à la première seconde avec une question choc, un constat décalé ou une situation vécue hyper identifiable. Le spectateur doit se dire "Mais grave, ça m'arrive tout le temps !".
+- Attaque DIRECTEMENT à la première seconde avec une question choc, un constat décalé ou une situation vécue hyper identifiable.
 
-NARRATION ET STORYTELLING (Le secret de la rétention) :
-- Le Cerveau comme personnage : Traite le cerveau du spectateur comme un colocataire un peu parano, maladroit ou dramatique (ex: "Ton cerveau panique", "Il croit que tu vas mourir", "C'est son mode économie d'énergie").
-- Analogies modernes : Vulgarise la science en utilisant des références actuelles (un bug de mise à jour, un lag de jeu vidéo, une alarme de voiture).
-- Micro-hooks de relance : Insère des phrases au milieu de la vidéo pour relancer l'attention (ex: "Mais le plus fou, c'est que...", "Et c'est là que ça devient une dinguerie...").
+NARRATION ET STORYTELLING :
+- Le Cerveau comme personnage : Traite le cerveau du spectateur comme un colocataire un peu parano, maladroit ou dramatique.
+- Analogies modernes : Vulgarise la science en utilisant des références actuelles (un bug de mise à jour, un lag de jeu vidéo, une alarme).
+- Micro-hooks de relance : Insère des phrases au milieu de la vidéo pour relancer l'attention.
 - Style parlé et percutant : Phrases très courtes. Vocabulaire jeune, urbain et piquant (buguer, dinguerie, chelou, frérot).
 
-RÈGLE DE L'ANTI-CLIMAX COMIQUE (Créer de la fausse attente) :
-- Quand tu prépares une explication ou un tournant dans la vidéo ("Et c'est là que ça devient absurde..."), monte la tension comme pour un film d'action ou un truc grandiose.
-- Puis casse immédiatement l'ambiance avec une réalité ridicule ou décevante, idéalement accompagnée d'un bruitage marquant.
+RÈGLE DE L'ANTI-CLIMAX COMIQUE :
+- Monte la tension comme pour un film d'action, puis casse immédiatement l'ambiance avec une réalité ridicule ou décevante.
 
 DURÉE DES SHORTS :
-- Le Short doit durer au minimum 35 secondes. Zone idéale : environ 45 à 65 secondes (soit 120 à 170 mots). NE REMPLIS PAS AVEC DU VIDE.
+- Le Short doit durer au minimum 35 secondes. Zone idéale : environ 45 à 65 secondes (soit 120 à 170 mots).
 
 PEXELS, MASCOTTES ET BRUITAGES (SFX) :
-- Chaque scène est accompagnée d'une vidéo Pexels, d'une mascotte et d'un bruitage optionnel.
+- Le champ `visual_query` DOIT TOUJOURS cibler l'action visuelle précise de la phrase (ex: si la voix parle de tomber dans la rue, la requête doit être "person falling" et non pas "street").
 - Laisse le champ 'sfx' vide ("") si la phrase n'a pas besoin d'accentuation. Utilise les sons comme sfx_boom, sfx_glitch, sfx_siren, sfx_punch, sfx_pop.
 
 CTA DYNAMIQUE (Dernière scène) :
-- La dernière scène DOIT être une Call To Action originale, qui lie naturellement l'explication qu'on vient d'entendre avec l'incitation à s'abonner.
-- Exemple : "Alors pour éviter de te faire arnaquer par tes propres neurones, abonne-toi au Cerveau Curieux !"
+- La dernière scène DOIT être une Call To Action originale, qui lie naturellement l'explication avec l'incitation à s'abonner.
 """
 
 
@@ -266,7 +263,6 @@ def validate_and_repair_script(data: Dict) -> Dict:
     normalized = [normalize_scene(s) for s in scenes if normalize_scene(s)]
     if not normalized: raise RuntimeError("Le script Gemini est vide.")
 
-    # La CTA dynamique demande de la joie et un ding à la toute fin
     normalized[-1]["emotion"] = "happy"
     normalized[-1]["sfx"] = "sfx_ding"
     data["script_principal"] = normalized
@@ -289,7 +285,7 @@ def validate_and_repair_script(data: Dict) -> Dict:
 
 
 # ============================================================
-# APPEL GEMINI (NOUVEAU SDK)
+# APPEL GEMINI
 # ============================================================
 
 def call_gemini_script(client, contents: str) -> Dict:
@@ -363,13 +359,11 @@ def repair_script_by_real_duration(client, topic: str, data: Dict, measured_dura
 def choose_sfx_for_scene(scene: Dict, idx: int, total_scenes: int) -> Optional[Dict]:
     sfx_name = scene.get("sfx", "")
     
-    # CTA = Ding
     if idx == total_scenes - 1: sfx_name = "sfx_ding"
     if not sfx_name: return None
     
     sfx_file = BASE_DIR / f"{sfx_name}.mp3"
     
-    # Fallback si le fichier son exact n'existe pas physiquement
     if not sfx_file.exists():
         if "boom" in sfx_name or "punch" in sfx_name: sfx_file = BASE_DIR / "sfx_pop.mp3"
         elif "glitch" in sfx_name or "siren" in sfx_name: sfx_file = BASE_DIR / "sfx_whoosh.mp3"
@@ -512,6 +506,9 @@ def create_fallback_video_clip(output_clip: Path, mascot_img: Path, sfx_icon_img
         cmd = [FFMPEG_BIN, "-y", "-loop", "1", "-i", str(fallback), "-loop", "1", "-i", str(mascot_img.resolve()), "-t", str(duration), "-filter_complex", filter_complex, "-map", "[v_out]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(fps), "-movflags", "+faststart", str(output_clip)]
     run_command(cmd, cwd=work_dir)
 
+# ============================================================
+# SOUS-TITRES ASS DYNAMIQUES (AJOUT DU REBOND)
+# ============================================================
 
 def create_ass_subtitles(scenes: List[Dict], output_ass: Path, width: int, height: int):
     font_size, margin_v = (58, 300) if width == 1080 else (40, 75)
@@ -543,7 +540,8 @@ def create_ass_subtitles(scenes: List[Dict], output_ass: Path, width: int, heigh
                 formatted_words = []
                 for k, w in enumerate(chunk_words):
                     safe_word = re.sub(r'[,\.\?!;:]', '', w)
-                    if k == idx_word: formatted_words.append("{\\c&H00FFFF&}" + safe_word + "{\\c&HFFFFFF&}")
+                    # Dynamisme : Le mot prononcé grandit légèrement et change de couleur
+                    if k == idx_word: formatted_words.append("{\\fscx120\\fscy120\\c&H00FFFF&}" + safe_word + "{\\fscx100\\fscy100\\c&HFFFFFF&}")
                     else: formatted_words.append(safe_word)
                 lines.append(f"Dialogue: 0,{ass_time(start_t)},{ass_time(end_t)},Default,,0,0,0,,{' '.join(formatted_words)}")
         current_time += scene_duration
@@ -587,9 +585,8 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         mascot_img = MASCOT_FILES.get(scene.get("emotion", "default"), MASCOT_FILES["default"])
         if not mascot_img.exists(): mascot_img = MASCOT_FILES["default"]
 
-        # Récupération de l'emoji si le son est présent
         sfx_name = scene.get("sfx", "")
-        if idx == len(script_scenes) - 1: sfx_name = "sfx_ding" # Force le ding à la fin
+        if idx == len(script_scenes) - 1: sfx_name = "sfx_ding"
         sfx_icon_img = CUSTOM_EMOJIS.get(sfx_name)
 
         status_cb(f"🎬 Clip {idx + 1}/{len(script_scenes)} : {scene.get('visual_query', '')}")
@@ -684,7 +681,6 @@ def render_results():
             st.code("".join(f"Scène {idx + 1} : {scene.get('text', '')}\n\n" for idx, scene in enumerate(ai_data.get("script_principal", []))), language="text")
 
     with video_tab:
-        # CORRECTION : video_path utilisé à la place de x
         paths = [Path(str(video_path))] if format_choisi == "short_single" else [Path(str(x)) for x in video_path]
         if format_choisi == "short_twoparts":
             col1, col2 = st.columns(2)
