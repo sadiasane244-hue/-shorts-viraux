@@ -32,7 +32,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================
-# CLÉS API & MODÈLES GEMINI
+# CLÉS API & DÉTECTION MODÈLES GEMINI
 # ============================================================
 
 def get_secret(name: str) -> str:
@@ -45,15 +45,36 @@ def get_secret(name: str) -> str:
 PEXELS_API_KEY = get_secret("PEXELS_API_KEY")
 GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
 
-# Modèles Gemini officiels gérés par le SDK google-genai
-GEMINI_MODELS_FALLBACK = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash"
-]
-
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
+
+
+def get_available_flash_models(client: genai.Client) -> List[str]:
+    """
+    Récupère dynamiquement la liste des modèles Flash disponibles sur l'API,
+    et définit une liste de secours à tester.
+    """
+    detected_models = []
+    try:
+        models_list = client.models.list()
+        for m in models_list:
+            m_name = getattr(m, "name", "") or ""
+            clean_name = m_name.replace("models/", "")
+            if "flash" in clean_name.lower():
+                detected_models.append(clean_name)
+    except Exception:
+        pass
+
+    # Ordre de priorité des modèles récents
+    fallback_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]
+    
+    # Fusion sans doublons en gardant les détectés en premier
+    final_list = []
+    for model in detected_models + fallback_models:
+        if model not in final_list:
+            final_list.append(model)
+            
+    return final_list
 
 
 # ============================================================
@@ -312,13 +333,14 @@ def validate_and_repair_script(data: Dict) -> Dict:
 
 
 # ============================================================
-# GEMINI GENERATION (GOOGLE GENAI SDK)
+# GEMINI GENERATION (GOOGLE GENAI SDK AVEC DÉTECTION)
 # ============================================================
 
 def call_ai_script(client: genai.Client, contents: str, status_cb=None) -> Dict:
+    models_to_try = get_available_flash_models(client)
     last_exception = None
 
-    for model in GEMINI_MODELS_FALLBACK:
+    for model in models_to_try:
         for attempt in range(2):
             try:
                 if status_cb and attempt == 0:
@@ -340,6 +362,10 @@ def call_ai_script(client: genai.Client, contents: str, status_cb=None) -> Dict:
             except Exception as e:
                 last_exception = e
                 err_str = str(e).lower()
+
+                # Si le modèle renvoie 404 NOT_FOUND, on passe immédiatement au suivant
+                if any(err in err_str for err in ["404", "not_found", "not found"]):
+                    break
 
                 if any(err in err_str for err in ["rate", "429", "503", "502", "overloaded", "quota"]):
                     sleep_time = (2 ** attempt) + random.uniform(0.5, 1.5)
@@ -368,7 +394,7 @@ def repair_script_by_words(client: genai.Client, topic: str, data: Dict, status_
 def generate_script_ai(topic: str, status_cb) -> Tuple[Dict, genai.Client]:
     if not GEMINI_API_KEY: raise RuntimeError("Clé API GEMINI_API_KEY manquante dans les secrets.")
     
-    # Client Google GenAI
+    # Initialisation du client officiel Google GenAI
     client = genai.Client(api_key=GEMINI_API_KEY)
     status_cb("🧠 Écriture du script drôle avec Gemini...")
 
@@ -603,7 +629,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         if url and download_file(url, visual_file):
             create_video_clip_from_pexels(visual_file, mascot_img, output_clip, duration, width, height, mascot_scale, pos_x, pos_y, work_dir)
         else:
-            create_fallback_video_clip(output_clip, mascot_img, duration, width, height, mascot_scale, pos_x, pos_y, work_dir)
+            create_fallback_video_clip(output_clip, mascot_img, output_clip, duration, width, height, mascot_scale, pos_x, pos_y, work_dir)
         video_clips.append(output_clip)
 
     status_cb("⚡ Fusion finale et sous-titres...")
@@ -716,7 +742,7 @@ def main():
         st.markdown("<h3 style='text-align:center;'>Tableau de bord</h3>", unsafe_allow_html=True)
         if MASCOT_FILES["default"].exists(): st.image(str(MASCOT_FILES["default"]), use_container_width=True)
         st.markdown("---")
-        st.markdown("⚡ **Moteur : SDK Officielles Google GenAI**")
+        st.markdown("⚡ **Moteur : SDK Officiel Google GenAI**")
         st.write("Exécution directe sur Google AI Studio.")
 
     st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>', unsafe_allow_html=True)
