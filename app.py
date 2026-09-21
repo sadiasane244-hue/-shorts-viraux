@@ -11,7 +11,10 @@ from typing import List, Dict, Optional, Tuple
 import requests
 from PIL import Image
 import streamlit as st
-from openai import OpenAI
+
+# Importation du SDK officiel Google GenAI
+from google import genai
+from google.genai import types
 
 
 # ============================================================
@@ -29,7 +32,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================
-# CLÉS API & LISTE DES MODÈLES OPENROUTER (GRATUITS & STABLES)
+# CLÉS API & MODÈLES GEMINI
 # ============================================================
 
 def get_secret(name: str) -> str:
@@ -40,15 +43,13 @@ def get_secret(name: str) -> str:
     return value or ""
 
 PEXELS_API_KEY = get_secret("PEXELS_API_KEY")
-OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY")
+GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
 
-# Liste de modèles 100% gratuits sur OpenRouter (Meta, Mistral, Qwen...)
-OPENROUTER_MODELS_FALLBACK = [
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "meta-llama/llama-3.1-8b-instruct:free",
-    "mistralai/mistral-7b-instruct:free",
-    "qwen/qwen-2.5-72b-instruct:free",
-    "google/gemma-2-9b-it:free"
+# Modèles Gemini officiels gérés par le SDK google-genai
+GEMINI_MODELS_FALLBACK = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash"
 ]
 
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
@@ -130,7 +131,7 @@ ACCROCHE (HOOK) :
 RECHERCHE VISUELLE (PEXELS) :
 - `visual_query` doit être une description d'action humaine réaliste en anglais (ex: 'sleeping man suddenly waking up shocked', 'person staring at phone in bed').
 
-FORMAT DE RÉPONSE STRICT (RÉPONDS UNIQUEMENT AVEC LE CODE JSON VALIDE CI-DESSOUS, AUCUN TEXTE AVANT NI APRÈS) :
+FORMAT DE RÉPONSE STRICT (JSON VALIDE) :
 {
   "format_choisi": "short_single",
   "title": "Titre accrocheur (max 65 car)",
@@ -267,9 +268,7 @@ def normalize_scene(scene) -> Optional[Dict]:
     }
 
 def extract_json_from_text(text: str) -> dict:
-    """Extrait le JSON d'une réponse IA même si elle ajoute du texte avant/après."""
     text = text.strip()
-    # Nettoie les balises markdown si l'IA en a généré
     if "```json" in text:
         text = text.split("```json")[1]
     if "```" in text:
@@ -313,27 +312,28 @@ def validate_and_repair_script(data: Dict) -> Dict:
 
 
 # ============================================================
-# OPENROUTER GENERATION (BASCULEMENT AUTO MULTI-MODÈLES)
+# GEMINI GENERATION (GOOGLE GENAI SDK)
 # ============================================================
 
-def call_ai_script(client: OpenAI, contents: str, status_cb=None) -> Dict:
+def call_ai_script(client: genai.Client, contents: str, status_cb=None) -> Dict:
     last_exception = None
 
-    for model in OPENROUTER_MODELS_FALLBACK:
+    for model in GEMINI_MODELS_FALLBACK:
         for attempt in range(2):
             try:
                 if status_cb and attempt == 0:
-                    status_cb(f"🧠 Appel de l'IA (Modèle: {model})...")
+                    status_cb(f"🧠 Appel de Gemini via SDK officiel ({model})...")
                 
-                response = client.chat.completions.create(
+                response = client.models.generate_content(
                     model=model,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": contents}
-                    ],
-                    temperature=0.85,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        temperature=0.8,
+                        response_mime_type="application/json"
+                    )
                 )
-                raw_text = response.choices[0].message.content
+                raw_text = response.text
                 parsed = extract_json_from_text(raw_text)
                 return validate_and_repair_script(parsed)
 
@@ -341,23 +341,18 @@ def call_ai_script(client: OpenAI, contents: str, status_cb=None) -> Dict:
                 last_exception = e
                 err_str = str(e).lower()
 
-                if any(m in err_str for m in ["404", "not found", "does not exist", "unsupported"]):
-                    if status_cb:
-                        status_cb(f"⚠️ Modèle {model} indisponible. Basculement...")
-                    break
-
-                if any(err in err_str for err in ["rate", "429", "503", "502", "unavailable", "overloaded", "busy"]):
+                if any(err in err_str for err in ["rate", "429", "503", "502", "overloaded", "quota"]):
                     sleep_time = (2 ** attempt) + random.uniform(0.5, 1.5)
                     if status_cb:
-                        status_cb(f"⏳ Serveur occupé ({model}). Retentative dans {sleep_time:.1f}s...")
+                        status_cb(f"⏳ Serveur en pause ({model}). Retentative dans {sleep_time:.1f}s...")
                     time.sleep(sleep_time)
                     continue
                 
                 break
 
-    raise RuntimeError(f"Erreur API : Impossible de contacter un modèle valide. Détail : {last_exception}")
+    raise RuntimeError(f"Erreur Gemini API : Impossible de générer le script. Détail : {last_exception}")
 
-def repair_script_by_words(client: OpenAI, topic: str, data: Dict, status_cb, too_short: bool) -> Dict:
+def repair_script_by_words(client: genai.Client, topic: str, data: Dict, status_cb, too_short: bool) -> Dict:
     scenes = data.get("script_principal", [])
     word_count = count_words_in_scenes(scenes)
     current_script = "\n".join(scene.get("text", "") for scene in scenes)
@@ -365,20 +360,17 @@ def repair_script_by_words(client: OpenAI, topic: str, data: Dict, status_cb, to
     instruction = f"Le script fait {word_count} mots. Écris des phrases complètes et naturelles pour viser {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots au total." if too_short else f"Le script fait {word_count} mots. Resserre la narration vers {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots avec des phrases fluides."
     prompt = f"Sujet: {topic}\n\n{instruction}\n\nScript actuel :\n{current_script}\n\nConserve le style hilarant."
     
-    status_cb("🧠 Ajustement du contenu avec l'IA...")
+    status_cb("🧠 Ajustement du contenu avec Gemini...")
     repaired = call_ai_script(client, prompt, status_cb)
     repaired["format_choisi"] = data.get("format_choisi", repaired.get("format_choisi", "short_single"))
     return repaired
 
-def generate_script_ai(topic: str, status_cb) -> Tuple[Dict, OpenAI]:
-    if not OPENROUTER_API_KEY: raise RuntimeError("Clé API OPENROUTER_API_KEY manquante dans les secrets.")
+def generate_script_ai(topic: str, status_cb) -> Tuple[Dict, genai.Client]:
+    if not GEMINI_API_KEY: raise RuntimeError("Clé API GEMINI_API_KEY manquante dans les secrets.")
     
-    # Configuration du client OpenAI pour pointer vers OpenRouter
-    client = OpenAI(
-        api_key=OPENROUTER_API_KEY,
-        base_url="https://openrouter.ai/api/v1"
-    )
-    status_cb("🧠 Écriture du script drôle et captivant...")
+    # Client Google GenAI
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    status_cb("🧠 Écriture du script drôle avec Gemini...")
 
     prompt = f"""Sujet à traiter : {topic.strip()}
     Rédige un script super drôle et dynamique. 
@@ -396,7 +388,7 @@ def generate_script_ai(topic: str, status_cb) -> Tuple[Dict, OpenAI]:
     except Exception as e:
         raise RuntimeError(f"Erreur Génération IA : {e}")
 
-def repair_script_by_real_duration(client: OpenAI, topic: str, data: Dict, measured_duration: float, status_cb) -> Dict:
+def repair_script_by_real_duration(client: genai.Client, topic: str, data: Dict, measured_duration: float, status_cb) -> Dict:
     scenes = data.get("script_principal", [])
     current_script = "\n".join(scene.get("text", "") for scene in scenes)
 
@@ -724,8 +716,8 @@ def main():
         st.markdown("<h3 style='text-align:center;'>Tableau de bord</h3>", unsafe_allow_html=True)
         if MASCOT_FILES["default"].exists(): st.image(str(MASCOT_FILES["default"]), use_container_width=True)
         st.markdown("---")
-        st.markdown("⚡ **Moteur : OpenRouter (Meta/Mistral)**")
-        st.write("Hub multi-modèles avec basculement automatique.")
+        st.markdown("⚡ **Moteur : SDK Officielles Google GenAI**")
+        st.write("Exécution directe sur Google AI Studio.")
 
     st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Studio IA Autonome 🎬</div>', unsafe_allow_html=True)
