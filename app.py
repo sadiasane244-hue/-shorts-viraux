@@ -42,12 +42,14 @@ def get_secret(name: str) -> str:
 PEXELS_API_KEY = get_secret("PEXELS_API_KEY")
 GROQ_API_KEY = get_secret("GROQ_API_KEY")
 
-# Liste de modèles ordonnée par préférence. Si l'un échoue (404/400), le suivant prend le relais.
+# Liste de modèles mise à jour avec les alternatives stables et pérennes de Groq
 GROQ_MODELS_FALLBACK = [
     "llama-3.3-70b-versatile",
     "llama-3.1-70b-versatile",
     "llama-3.1-8b-instant",
-    "mixtral-8x7b-32768"
+    "llama3-70b-8192",
+    "llama3-8b-8192",
+    "gemma2-9b-it"
 ]
 
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
@@ -326,13 +328,11 @@ def call_groq_script(client: OpenAI, contents: str, status_cb=None) -> Dict:
                 last_exception = e
                 err_str = str(e).lower()
 
-                # Si le modèle n'existe pas ou est retiré, on passe immédiatement au modèle suivant
-                if any(m in err_str for m in ["404", "model_not_found", "decommissioned", "does not exist", "access"]):
+                if any(m in err_str for m in ["404", "model_not_found", "decommissioned", "does not exist", "access", "model_decommissioned"]):
                     if status_cb:
                         status_cb(f"⚠️ Modèle {model} indisponible. Basculement sur le modèle suivant...")
                     break
 
-                # Si c'est un problème d'encombrement / quota temporaire, on patiente
                 if any(err in err_str for err in ["rate", "429", "503", "500", "unavailable", "overloaded", "busy"]):
                     sleep_time = (2 ** attempt) + random.uniform(0.5, 1.5)
                     if status_cb:
@@ -453,7 +453,6 @@ def concatenate_audio(audio_clips: List[Path], work_dir: Path) -> Path:
     return raw_audio
 
 def convert_audio_to_aac(voice_audio: Path, work_dir: Path) -> Path:
-    """Convertit la piste vocale au format AAC."""
     output = work_dir / "full_audio.m4a"
     run_command([FFMPEG_BIN, "-y", "-i", str(voice_audio), "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", str(output)], cwd=work_dir)
     return output
@@ -711,7 +710,7 @@ def main():
         st.markdown("<h3 style='text-align:center;'>Tableau de bord</h3>", unsafe_allow_html=True)
         if MASCOT_FILES["default"].exists(): st.image(str(MASCOT_FILES["default"]), use_container_width=True)
         st.markdown("---")
-        st.markdown("⚡ **Moteur : Groq (Llama 3 / Mixtral)**")
+        st.markdown("⚡ **Moteur : Groq (Llama 3 / Mixtral / Gemma 2)**")
         st.write("Génération ultra-rapide avec basculement automatique de secours.")
 
     st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>', unsafe_allow_html=True)
