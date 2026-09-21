@@ -117,53 +117,51 @@ class ShortTooLongError(RuntimeError): pass
 
 
 # ============================================================
-# SCHÉMA JSON GEMINI (AMÉLIORÉ POUR L'ACTION)
+# SCHÉMA JSON GEMINI (AMÉLIORÉ POUR MICRO-SCÈNES ET PHRASES DESCRIPTIVES)
 # ============================================================
 
 class Scene(BaseModel):
-    text: str = Field(description="Une seule phrase courte de narration. Ton moderne, jeune, urbain et naturel.")
+    text: str = Field(description="Un TRÈS COURT fragment de phrase (3 à 6 mots max). Le but est que la voix off de ce plan dure entre 1.5 et 2.5 secondes maximum.")
     emotion: str = Field(description="Émotion de la mascotte parmi: default, thinking, confused, laughing, explaining, surprised, angry, happy, shocked, sad")
-    visual_query: str = Field(description="Mots-clés visuels en anglais, 2 à 4 mots. DOIT décrire l'ACTION PHYSIQUE EXACTE (ex: 'person tripping', 'falling down', 'spilling coffee'). Interdit d'utiliser des mots abstraits comme 'street' ou 'mind'.")
-    sfx: str = Field(default="", description="Nom exact du bruitage. Options: sfx_boom, sfx_glitch, sfx_siren, sfx_punch, sfx_cricket, sfx_laugh, sfx_whoosh, sfx_pop, sfx_ding. Laisse vide si aucun bruitage.")
+    visual_query: str = Field(description="Une phrase descriptive complète et détaillée en anglais (ex: 'young woman walking and tripping on the street', 'man staring confused at a smartphone'). Décris l'action précise.")
+    sfx: str = Field(default="", description="Nom exact du bruitage. Options: sfx_boom, sfx_glitch, sfx_siren, sfx_punch, sfx_cricket, sfx_laugh, sfx_whoosh, sfx_pop, sfx_ding.")
 
 class ScriptOutput(BaseModel):
     format_choisi: str = Field(description="Choix parmi: short_single, short_twoparts, long_plus_teaser")
     title: str = Field(description="Titre YouTube/TikTok très accrocheur, basé sur la curiosité. Max 65 car.")
     hashtags: List[str] = Field(description="4 à 6 hashtags pertinents directement liés au sujet.")
-    script_principal: List[Scene] = Field(description="Scènes principales. Pour un Short, viser 120 à 170 mots.")
+    script_principal: List[Scene] = Field(description="Scènes principales découpées en micro-fragments. Pour un Short, viser 120 à 170 mots au total répartis sur beaucoup de scènes courtes.")
     script_teaser: List[Scene] = Field(default_factory=list, description="Scènes du teaser si besoin.")
 
 
 # ============================================================
-# PROMPT GEMINI (AMÉLIORÉ POUR LA COHÉRENCE VISUELLE)
+# PROMPT GEMINI (AMÉLIORÉ POUR LE RYTHME FRÉNÉTIQUE)
 # ============================================================
 
 SYSTEM_PROMPT = """
 Tu es le réalisateur et scénariste de la chaîne YouTube/TikTok "Cerveau Curieux".
 OBJECTIF : Créer des vidéos virales, humoristiques, dynamiques et documentées sur le cerveau, la psychologie et les comportements humains.
 
+RYTHME FRÉNÉTIQUE (IMPORTANT) :
+- Le montage doit être ultra-dynamique. 
+- Découpe ta narration en de multiples scènes très courtes.
+- Le champ `text` de chaque scène NE DOIT CONTENIR QUE 3 à 6 mots.
+- Une phrase complète doit souvent être séparée sur 2 ou 3 scènes différentes.
+
 ACCROCHE (HOOK) IMMÉDIATE :
-- Ne fais AUCUNE salutation (INTERDIT : "Wesh l'équipe", "Bonjour", etc.).
-- Attaque DIRECTEMENT à la première seconde avec une question choc, un constat décalé ou une situation vécue hyper identifiable.
+- Attaque DIRECTEMENT à la première seconde avec une question choc ou une situation vécue.
 
 NARRATION ET STORYTELLING :
-- Le Cerveau comme personnage : Traite le cerveau du spectateur comme un colocataire un peu parano, maladroit ou dramatique.
-- Analogies modernes : Vulgarise la science en utilisant des références actuelles (un bug de mise à jour, un lag de jeu vidéo, une alarme).
-- Micro-hooks de relance : Insère des phrases au milieu de la vidéo pour relancer l'attention.
-- Style parlé et percutant : Phrases très courtes. Vocabulaire jeune, urbain et piquant (buguer, dinguerie, chelou, frérot).
+- Le Cerveau comme personnage (un colocataire parano ou dramatique).
+- Analogies modernes (bug de mise à jour, lag, alarme).
+- Style parlé et percutant. Vocabulaire jeune et piquant.
 
-RÈGLE DE L'ANTI-CLIMAX COMIQUE :
-- Monte la tension comme pour un film d'action, puis casse immédiatement l'ambiance avec une réalité ridicule ou décevante.
-
-DURÉE DES SHORTS :
-- Le Short doit durer au minimum 35 secondes. Zone idéale : environ 45 à 65 secondes (soit 120 à 170 mots).
-
-PEXELS, MASCOTTES ET BRUITAGES (SFX) :
-- Le champ `visual_query` DOIT TOUJOURS cibler l'action visuelle précise de la phrase (ex: si la voix parle de tomber dans la rue, la requête doit être "person falling" et non pas "street").
-- Laisse le champ 'sfx' vide ("") si la phrase n'a pas besoin d'accentuation. Utilise les sons comme sfx_boom, sfx_glitch, sfx_siren, sfx_punch, sfx_pop.
+RECHERCHE VISUELLE (PEXELS) :
+- Le champ `visual_query` DOIT être une phrase descriptive complète en anglais détaillant une action humaine claire. 
+- Interdit d'utiliser des concepts abstraits. Parle d'humains faisant des actions (ex: "frustrated student looking at papers", "person dropping coffee").
 
 CTA DYNAMIQUE (Dernière scène) :
-- La dernière scène DOIT être une Call To Action originale, qui lie naturellement l'explication avec l'incitation à s'abonner.
+- La dernière scène DOIT être une Call To Action originale.
 """
 
 
@@ -230,9 +228,11 @@ def normalize_hashtags(hashtags: List[str]) -> List[str]:
     return clean[:6]
 
 def clean_pexels_query(query: str) -> str:
+    # On autorise maintenant les phrases longues (jusqu'à 80 caractères) 
+    # pour garder le contexte complet de l'action.
     query = re.sub(r"[^a-zA-Z\s]", "", query or "")
-    words = [w for w in query.split() if len(w) > 2]
-    return " ".join(words[:4])
+    words = [w for w in query.split() if len(w) > 1]
+    return " ".join(words)[:80].strip()
 
 def normalize_scene(scene) -> Optional[Dict]:
     if hasattr(scene, "model_dump"): scene = scene.model_dump()
@@ -250,7 +250,7 @@ def normalize_scene(scene) -> Optional[Dict]:
     return {
         "text": text,
         "emotion": emotion,
-        "visual_query": visual_query[:80],
+        "visual_query": visual_query,
         "sfx": sfx
     }
 
@@ -307,8 +307,8 @@ def repair_script_by_words(client, topic: str, data: Dict, status_cb, too_short:
     word_count = count_words_in_scenes(scenes)
     current_script = "\n".join(scene.get("text", "") for scene in scenes)
 
-    instruction = f"Le script fait {word_count} mots. Réécris-le pour viser {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots. N'ajoute pas de blabla, juste des infos et de l'humour." if too_short else f"Le script fait {word_count} mots. Réduis-le vers {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots. Supprime les longueurs."
-    prompt = f"Sujet: {topic}\n\n{instruction}\n\nScript actuel :\n{current_script}\n\nConserve le format humoristique et la CTA dynamique à la fin."
+    instruction = f"Le script fait {word_count} mots. Réécris-le pour viser {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots, en gardant le découpage frénétique." if too_short else f"Le script fait {word_count} mots. Réduis-le vers {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots. Garde les scènes très courtes (3-6 mots)."
+    prompt = f"Sujet: {topic}\n\n{instruction}\n\nScript actuel :\n{current_script}\n\nConserve le format humoristique."
     
     status_cb("🧠 Ajustement du contenu avec Gemini...")
     repaired = call_gemini_script(client, prompt)
@@ -321,8 +321,8 @@ def generate_script_gemini(topic: str, status_cb) -> Tuple[Dict, object]:
     status_cb("🧠 Analyse du sujet et rédaction du script...")
 
     prompt = f"""Sujet à traiter : {topic.strip()}
-    Crée le contenu complet de la vidéo avec une accroche choc immédiate et une CTA dynamique sur-mesure à la fin.
-    Vise {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots."""
+    Crée le contenu complet de la vidéo. Coupe les phrases en multiples petites scènes de 3 à 6 mots.
+    Vise {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots au total."""
     
     try:
         data = call_gemini_script(client, prompt)
@@ -341,10 +341,10 @@ def repair_script_by_real_duration(client, topic: str, data: Dict, measured_dura
 
     if measured_duration < SHORT_MIN_DURATION:
         status_cb(f"⏱️ Durée réelle trop courte ({measured_duration:.1f} s). Ajout d'infos...")
-        instruction = "Il faut dépasser 35 secondes. Ajoute de l'humour, de l'anti-climax et des faits."
+        instruction = "Il faut dépasser 35 secondes. Ajoute de l'humour en gardant les micro-scènes de 3-6 mots."
     else:
         status_cb(f"⏱️ Durée réelle trop longue ({measured_duration:.1f} s). Resserrement...")
-        instruction = "Resserre le script pour viser environ 45-65 secondes. Garde le rythme nerveux."
+        instruction = "Resserre le script pour viser environ 45-65 secondes. Garde le rythme nerveux (3-6 mots par scène)."
 
     prompt = f"Sujet : {topic}\n{instruction}\n\nSCRIPT ACTUEL :\n{current_script}"
     repaired = call_gemini_script(client, prompt)
@@ -445,7 +445,7 @@ def add_nasheed_track(voice_audio: Path, work_dir: Path, status_cb=None) -> Path
 
 def search_pexels_video(query: str, orientation: str) -> Optional[str]:
     if not PEXELS_API_KEY: return None
-    clean_query = clean_pexels_query(query) or "human thinking"
+    clean_query = clean_pexels_query(query) or "human action"
     try:
         r = requests.get("https://api.pexels.com/videos/search", headers={"Authorization": PEXELS_API_KEY}, params={"query": clean_query, "orientation": orientation, "per_page": 12}, timeout=10)
         if r.status_code != 200: return None
@@ -507,7 +507,7 @@ def create_fallback_video_clip(output_clip: Path, mascot_img: Path, sfx_icon_img
     run_command(cmd, cwd=work_dir)
 
 # ============================================================
-# SOUS-TITRES ASS DYNAMIQUES (AJOUT DU REBOND)
+# SOUS-TITRES ASS DYNAMIQUES 
 # ============================================================
 
 def create_ass_subtitles(scenes: List[Dict], output_ass: Path, width: int, height: int):
@@ -540,7 +540,6 @@ def create_ass_subtitles(scenes: List[Dict], output_ass: Path, width: int, heigh
                 formatted_words = []
                 for k, w in enumerate(chunk_words):
                     safe_word = re.sub(r'[,\.\?!;:]', '', w)
-                    # Dynamisme : Le mot prononcé grandit légèrement et change de couleur
                     if k == idx_word: formatted_words.append("{\\fscx120\\fscy120\\c&H00FFFF&}" + safe_word + "{\\fscx100\\fscy100\\c&HFFFFFF&}")
                     else: formatted_words.append(safe_word)
                 lines.append(f"Dialogue: 0,{ass_time(start_t)},{ass_time(end_t)},Default,,0,0,0,,{' '.join(formatted_words)}")
@@ -590,7 +589,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         sfx_icon_img = CUSTOM_EMOJIS.get(sfx_name)
 
         status_cb(f"🎬 Clip {idx + 1}/{len(script_scenes)} : {scene.get('visual_query', '')}")
-        url = search_pexels_video(scene.get("visual_query", "person thinking"), orientation)
+        url = search_pexels_video(scene.get("visual_query", "human action"), orientation)
         visual_file = work_dir / f"src_vis_{idx:03d}.mp4"
         output_clip = work_dir / f"clip_{idx:03d}.mp4"
         pos_x, pos_y = mascot_positions[idx % len(mascot_positions)]
