@@ -57,9 +57,6 @@ FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
 TTS_VOICE = "fr-FR-HenriNeural"
 TTS_RATE = "+5%"
 
-NASHEED_FILE = BASE_DIR / "nasheed.mp3"
-NASHEED_VOLUME = 0.055
-
 
 # ============================================================
 # DURÉE DES SHORTS
@@ -296,22 +293,35 @@ def validate_and_repair_script(data: Dict) -> Dict:
 
 
 # ============================================================
-# GEMINI GENERATION
+# GEMINI GENERATION (AVEC RETRY AUTOMATIQUE EN CAS DE SURCHARGE 503)
 # ============================================================
 
-def call_gemini_script(client, contents: str) -> Dict:
-    response = client.models.generate_content(
-        model="gemini-3.6-flash",
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            response_mime_type="application/json",
-            response_schema=ScriptOutput,
-            temperature=0.85,
-        ),
-    )
-    parsed = response.parsed.model_dump() if (hasattr(response, "parsed") and response.parsed) else json.loads(response.text)
-    return validate_and_repair_script(parsed)
+def call_gemini_script(client, contents: str, status_cb=None) -> Dict:
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    response_schema=ScriptOutput,
+                    temperature=0.85,
+                ),
+            )
+            parsed = response.parsed.model_dump() if (hasattr(response, "parsed") and response.parsed) else json.loads(response.text)
+            return validate_and_repair_script(parsed)
+        except Exception as e:
+            error_msg = str(e)
+            if any(err in error_msg for err in ["503", "429", "UNAVAILABLE", "Too Many Requests", "high demand"]):
+                if attempt < max_retries - 1:
+                    sleep_time = (2 ** attempt) + random.uniform(0.5, 1.5)
+                    if status_cb:
+                        status_cb(f"⏳ Serveurs API surchargés (503). Retentative auto dans {sleep_time:.1f}s... (Essai {attempt + 1}/{max_retries})")
+                    time.sleep(sleep_time)
+                    continue
+            raise RuntimeError(f"Erreur API Gemini : {e}")
 
 def repair_script_by_words(client, topic: str, data: Dict, status_cb, too_short: bool) -> Dict:
     scenes = data.get("script_principal", [])
@@ -322,7 +332,7 @@ def repair_script_by_words(client, topic: str, data: Dict, status_cb, too_short:
     prompt = f"Sujet: {topic}\n\n{instruction}\n\nScript actuel :\n{current_script}\n\nConserve le style hilarant."
     
     status_cb("🧠 Ajustement du contenu avec Gemini...")
-    repaired = call_gemini_script(client, prompt)
+    repaired = call_gemini_script(client, prompt, status_cb)
     repaired["format_choisi"] = data.get("format_choisi", repaired.get("format_choisi", "short_single"))
     return repaired
 
@@ -337,7 +347,7 @@ def generate_script_gemini(topic: str, status_cb) -> Tuple[Dict, object]:
     Vise entre {SHORT_TARGET_MIN_WORDS} et {SHORT_TARGET_MAX_WORDS} mots au total."""
     
     try:
-        data = call_gemini_script(client, prompt)
+        data = call_gemini_script(client, prompt, status_cb)
         format_choisi = data.get("format_choisi", "short_single")
         if format_choisi in ("short_single", "short_twoparts"):
             word_count = count_words_in_scenes(data.get("script_principal", []))
@@ -359,7 +369,7 @@ def repair_script_by_real_duration(client, topic: str, data: Dict, measured_dura
         instruction = "Resserre le script pour viser 45-65 secondes sans hacher les phrases."
 
     prompt = f"Sujet : {topic}\n{instruction}\n\nSCRIPT ACTUEL :\n{current_script}"
-    repaired = call_gemini_script(client, prompt)
+    repaired = call_gemini_script(client, prompt, status_cb)
     repaired["format_choisi"] = data.get("format_choisi", repaired.get("format_choisi", "short_single"))
     return repaired
 
@@ -386,7 +396,7 @@ def choose_sfx_for_scene(scene: Dict, idx: int, total_scenes: int) -> Optional[D
 
 
 # ============================================================
-# AUDIO PAR SCÈNE & MIXAGE
+# AUDIO PAR SCÈNE & CONVERSION VOIX
 # ============================================================
 
 def process_scene_audio(scene: Dict, idx: int, total_scenes: int, work_dir: Path) -> Path:
@@ -417,28 +427,15 @@ def concatenate_audio(audio_clips: List[Path], work_dir: Path) -> Path:
     run_command([FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", "concat_audio.txt", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", str(raw_audio)], cwd=work_dir)
     return raw_audio
 
-def add_nasheed_track(voice_audio: Path, work_dir: Path, status_cb=None) -> Path:
+def convert_audio_to_aac(voice_audio: Path, work_dir: Path) -> Path:
+    """Convertit la piste vocale pure au format AAC pour le rendu final."""
     output = work_dir / "full_audio.m4a"
-    if not NASHEED_FILE.exists():
-        if status_cb: status_cb("🎙️ Aucun nasheed détecté : voix seule.")
-        run_command([FFMPEG_BIN, "-y", "-i", str(voice_audio), "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", str(output)], cwd=work_dir)
-        return output
-    
-    if status_cb: status_cb("🎵 Nasheed détecté : mixage vocal intelligent...")
-    cmd = [
-        FFMPEG_BIN, "-y", "-i", str(voice_audio), "-stream_loop", "-1", "-i", str(NASHEED_FILE), "-filter_complex",
-        (f"[0:a]aresample=48000,aformat=channel_layouts=stereo,volume=1.0[voice];"
-         f"[1:a]aresample=48000,aformat=channel_layouts=stereo,volume={NASHEED_VOLUME},highpass=f=100,lowpass=f=9000,afade=t=in:st=0:d=1.5[nasheed_raw];"
-         "[nasheed_raw][voice]sidechaincompress=threshold=0.045:ratio=7:attack=20:release=300:makeup=1:knee=3[nasheed_ducked];"
-         "[voice][nasheed_ducked]amix=inputs=2:duration=first:dropout_transition=2,loudnorm=I=-16:LRA=11:TP=-1.5[mixed]"),
-        "-map", "[mixed]", "-ar", "48000", "-ac", "2", "-c:a", "aac", "-b:a", "192k", str(output)
-    ]
-    run_command(cmd, cwd=work_dir)
+    run_command([FFMPEG_BIN, "-y", "-i", str(voice_audio), "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", str(output)], cwd=work_dir)
     return output
 
 
 # ============================================================
-# VIDÉO PEXELS & MASCOTTE UNIQUE (SANS DOUBLE INCRUSTATION)
+# VIDÉO PEXELS & MASCOTTE UNIQUE
 # ============================================================
 
 def search_pexels_video(query: str, orientation: str) -> Optional[str]:
@@ -533,7 +530,7 @@ def create_ass_subtitles(scenes: List[Dict], output_ass: Path, width: int, heigh
 
 
 # ============================================================
-# PIPELINE VIDÉO MAITRE
+# PIPELINE VIDÉO MAÎTRE
 # ============================================================
 
 def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status_cb) -> Path:
@@ -547,7 +544,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
     status_cb("🎙️ Génération de la voix off fluide...")
     audio_clips = [process_scene_audio(scene, idx, len(script_scenes), work_dir) for idx, scene in enumerate(script_scenes)]
     raw_audio = concatenate_audio(audio_clips, work_dir)
-    full_audio = add_nasheed_track(raw_audio, work_dir, status_cb)
+    full_audio = convert_audio_to_aac(raw_audio, work_dir)
     
     voice_duration = get_media_duration(full_audio)
     status_cb(f"⏱️ Durée audio réelle : {voice_duration:.1f} secondes")
@@ -647,9 +644,6 @@ def render_results():
         st.info(f"**Titre suggéré :** {title}")
         st.write("**Hashtags :** " + " ".join(ai_data.get("hashtags", [])))
         st.write(f"📝 **Narration : {count_words_in_scenes(ai_data.get('script_principal', []))} mots**")
-        st.markdown("---")
-        if NASHEED_FILE.exists(): st.success("🎵 Nasheed : actif")
-        else: st.info("🎵 Nasheed : désactivé")
         
         with st.expander("📜 Voir le script complet"):
             st.code("".join(f"Scène {idx + 1} : {scene.get('text', '')}\n\n" for idx, scene in enumerate(ai_data.get("script_principal", []))), language="text")
@@ -694,10 +688,6 @@ def main():
         st.markdown("---")
         st.markdown("🎯 **Mode Autonome Actif**")
         st.write("Pipeline Gemini + Edge-TTS + Pexels Video + FFmpeg.")
-        st.markdown("---")
-        st.markdown("### 🎵 Audio")
-        if NASHEED_FILE.exists(): st.success("Nasheed actif")
-        else: st.info("Nasheed désactivé")
 
     st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Studio IA Autonome 🎬</div>', unsafe_allow_html=True)
