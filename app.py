@@ -29,7 +29,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================
-# CLÉS API & LISTE DES MODÈLES GROQ (AVEC SECOURS AUTO)
+# CLÉS API & LISTE DES MODÈLES OPENROUTER (GRATUITS & STABLES)
 # ============================================================
 
 def get_secret(name: str) -> str:
@@ -40,16 +40,15 @@ def get_secret(name: str) -> str:
     return value or ""
 
 PEXELS_API_KEY = get_secret("PEXELS_API_KEY")
-GROQ_API_KEY = get_secret("GROQ_API_KEY")
+OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY")
 
-# Liste de modèles mise à jour avec les alternatives stables et pérennes de Groq
-GROQ_MODELS_FALLBACK = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-70b-versatile",
-    "llama-3.1-8b-instant",
-    "llama3-70b-8192",
-    "llama3-8b-8192",
-    "gemma2-9b-it"
+# Liste de modèles 100% gratuits sur OpenRouter (Meta, Mistral, Qwen...)
+OPENROUTER_MODELS_FALLBACK = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
+    "qwen/qwen-2.5-72b-instruct:free",
+    "google/gemma-2-9b-it:free"
 ]
 
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
@@ -109,7 +108,7 @@ class ShortTooLongError(RuntimeError): pass
 
 
 # ============================================================
-# PROMPT GROQ / LLAMA 3 (HUMOUR & JSON STRICT)
+# PROMPT IA (HUMOUR & JSON STRICT)
 # ============================================================
 
 SYSTEM_PROMPT = """
@@ -131,7 +130,7 @@ ACCROCHE (HOOK) :
 RECHERCHE VISUELLE (PEXELS) :
 - `visual_query` doit être une description d'action humaine réaliste en anglais (ex: 'sleeping man suddenly waking up shocked', 'person staring at phone in bed').
 
-FORMAT DE RÉPONSE STRICT (RÉPONDS UNIQUEMENT EN JSON VALIDE) :
+FORMAT DE RÉPONSE STRICT (RÉPONDS UNIQUEMENT AVEC LE CODE JSON VALIDE CI-DESSOUS, AUCUN TEXTE AVANT NI APRÈS) :
 {
   "format_choisi": "short_single",
   "title": "Titre accrocheur (max 65 car)",
@@ -188,7 +187,6 @@ def count_words_in_scenes(scenes: List[Dict]) -> int:
 # ============================================================
 
 def fix_phonetics_for_tts(text: str) -> str:
-    """Corrige la prononciation des mots complexes ou anglicismes pour Edge-TTS."""
     replacements = {
         r"\bacquérir\b": "akérir",
         r"\bacquiert\b": "akère",
@@ -268,6 +266,22 @@ def normalize_scene(scene) -> Optional[Dict]:
         "sfx": sfx
     }
 
+def extract_json_from_text(text: str) -> dict:
+    """Extrait le JSON d'une réponse IA même si elle ajoute du texte avant/après."""
+    text = text.strip()
+    # Nettoie les balises markdown si l'IA en a généré
+    if "```json" in text:
+        text = text.split("```json")[1]
+    if "```" in text:
+        text = text.split("```")[0]
+    
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1:
+        text = text[start:end+1]
+    
+    return json.loads(text)
+
 def validate_and_repair_script(data: Dict) -> Dict:
     if not isinstance(data, dict): raise RuntimeError("Réponse IA invalide.")
     
@@ -299,13 +313,13 @@ def validate_and_repair_script(data: Dict) -> Dict:
 
 
 # ============================================================
-# GROQ GENERATION (AVEC BASCULEMENT AUTO DE MODÈLE)
+# OPENROUTER GENERATION (BASCULEMENT AUTO MULTI-MODÈLES)
 # ============================================================
 
-def call_groq_script(client: OpenAI, contents: str, status_cb=None) -> Dict:
+def call_ai_script(client: OpenAI, contents: str, status_cb=None) -> Dict:
     last_exception = None
 
-    for model in GROQ_MODELS_FALLBACK:
+    for model in OPENROUTER_MODELS_FALLBACK:
         for attempt in range(2):
             try:
                 if status_cb and attempt == 0:
@@ -317,23 +331,22 @@ def call_groq_script(client: OpenAI, contents: str, status_cb=None) -> Dict:
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": contents}
                     ],
-                    response_format={"type": "json_object"},
                     temperature=0.85,
                 )
                 raw_text = response.choices[0].message.content
-                parsed = json.loads(raw_text)
+                parsed = extract_json_from_text(raw_text)
                 return validate_and_repair_script(parsed)
 
             except Exception as e:
                 last_exception = e
                 err_str = str(e).lower()
 
-                if any(m in err_str for m in ["404", "model_not_found", "decommissioned", "does not exist", "access", "model_decommissioned"]):
+                if any(m in err_str for m in ["404", "not found", "does not exist", "unsupported"]):
                     if status_cb:
-                        status_cb(f"⚠️ Modèle {model} indisponible. Basculement sur le modèle suivant...")
+                        status_cb(f"⚠️ Modèle {model} indisponible. Basculement...")
                     break
 
-                if any(err in err_str for err in ["rate", "429", "503", "500", "unavailable", "overloaded", "busy"]):
+                if any(err in err_str for err in ["rate", "429", "503", "502", "unavailable", "overloaded", "busy"]):
                     sleep_time = (2 ** attempt) + random.uniform(0.5, 1.5)
                     if status_cb:
                         status_cb(f"⏳ Serveur occupé ({model}). Retentative dans {sleep_time:.1f}s...")
@@ -342,7 +355,7 @@ def call_groq_script(client: OpenAI, contents: str, status_cb=None) -> Dict:
                 
                 break
 
-    raise RuntimeError(f"Erreur API Groq : Impossible de contacter un modèle valide. Détail : {last_exception}")
+    raise RuntimeError(f"Erreur API : Impossible de contacter un modèle valide. Détail : {last_exception}")
 
 def repair_script_by_words(client: OpenAI, topic: str, data: Dict, status_cb, too_short: bool) -> Dict:
     scenes = data.get("script_principal", [])
@@ -352,19 +365,20 @@ def repair_script_by_words(client: OpenAI, topic: str, data: Dict, status_cb, to
     instruction = f"Le script fait {word_count} mots. Écris des phrases complètes et naturelles pour viser {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots au total." if too_short else f"Le script fait {word_count} mots. Resserre la narration vers {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots avec des phrases fluides."
     prompt = f"Sujet: {topic}\n\n{instruction}\n\nScript actuel :\n{current_script}\n\nConserve le style hilarant."
     
-    status_cb("🧠 Ajustement du contenu avec Groq...")
-    repaired = call_groq_script(client, prompt, status_cb)
+    status_cb("🧠 Ajustement du contenu avec l'IA...")
+    repaired = call_ai_script(client, prompt, status_cb)
     repaired["format_choisi"] = data.get("format_choisi", repaired.get("format_choisi", "short_single"))
     return repaired
 
-def generate_script_groq(topic: str, status_cb) -> Tuple[Dict, OpenAI]:
-    if not GROQ_API_KEY: raise RuntimeError("Clé API GROQ_API_KEY manquante dans les secrets.")
+def generate_script_ai(topic: str, status_cb) -> Tuple[Dict, OpenAI]:
+    if not OPENROUTER_API_KEY: raise RuntimeError("Clé API OPENROUTER_API_KEY manquante dans les secrets.")
     
+    # Configuration du client OpenAI pour pointer vers OpenRouter
     client = OpenAI(
-        api_key=GROQ_API_KEY,
-        base_url="https://api.groq.com/openai/v1"
+        api_key=OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1"
     )
-    status_cb("🧠 Écriture du script drôle et captivant avec Groq...")
+    status_cb("🧠 Écriture du script drôle et captivant...")
 
     prompt = f"""Sujet à traiter : {topic.strip()}
     Rédige un script super drôle et dynamique. 
@@ -372,7 +386,7 @@ def generate_script_groq(topic: str, status_cb) -> Tuple[Dict, OpenAI]:
     Vise entre {SHORT_TARGET_MIN_WORDS} et {SHORT_TARGET_MAX_WORDS} mots au total."""
     
     try:
-        data = call_groq_script(client, prompt, status_cb)
+        data = call_ai_script(client, prompt, status_cb)
         format_choisi = data.get("format_choisi", "short_single")
         if format_choisi in ("short_single", "short_twoparts"):
             word_count = count_words_in_scenes(data.get("script_principal", []))
@@ -380,7 +394,7 @@ def generate_script_groq(topic: str, status_cb) -> Tuple[Dict, OpenAI]:
             elif word_count > SHORT_MAX_WORDS: data = repair_script_by_words(client, topic, data, status_cb, False)
         return (data, client)
     except Exception as e:
-        raise RuntimeError(f"Erreur Groq : {e}")
+        raise RuntimeError(f"Erreur Génération IA : {e}")
 
 def repair_script_by_real_duration(client: OpenAI, topic: str, data: Dict, measured_duration: float, status_cb) -> Dict:
     scenes = data.get("script_principal", [])
@@ -394,7 +408,7 @@ def repair_script_by_real_duration(client: OpenAI, topic: str, data: Dict, measu
         instruction = "Resserre le script pour viser 45-65 secondes sans hacher les phrases."
 
     prompt = f"Sujet : {topic}\n{instruction}\n\nSCRIPT ACTUEL :\n{current_script}"
-    repaired = call_groq_script(client, prompt, status_cb)
+    repaired = call_ai_script(client, prompt, status_cb)
     repaired["format_choisi"] = data.get("format_choisi", repaired.get("format_choisi", "short_single"))
     return repaired
 
@@ -710,8 +724,8 @@ def main():
         st.markdown("<h3 style='text-align:center;'>Tableau de bord</h3>", unsafe_allow_html=True)
         if MASCOT_FILES["default"].exists(): st.image(str(MASCOT_FILES["default"]), use_container_width=True)
         st.markdown("---")
-        st.markdown("⚡ **Moteur : Groq (Llama 3 / Mixtral / Gemma 2)**")
-        st.write("Génération ultra-rapide avec basculement automatique de secours.")
+        st.markdown("⚡ **Moteur : OpenRouter (Meta/Mistral)**")
+        st.write("Hub multi-modèles avec basculement automatique.")
 
     st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Studio IA Autonome 🎬</div>', unsafe_allow_html=True)
@@ -730,7 +744,7 @@ def main():
             try:
                 def update_status(msg): st.write(msg)
                 
-                ai_data, groq_client = generate_script_groq(topic, update_status)
+                ai_data, ai_client = generate_script_ai(topic, update_status)
                 format_choisi = ai_data.get("format_choisi", "short_single")
                 word_count = count_words_in_scenes(ai_data.get("script_principal", []))
                 
@@ -745,7 +759,7 @@ def main():
                         except (ShortTooShortError, ShortTooLongError) as e:
                             if repair_attempt >= 2: raise RuntimeError(str(e) + " Impossible de stabiliser la durée.")
                             m = re.search(r"([0-9]+(?:\.[0-9]+)?)", str(e))
-                            ai_data = repair_script_by_real_duration(groq_client, topic, ai_data, float(m.group(1)) if m else (44.0 if isinstance(e, ShortTooShortError) else 91.0), update_status)
+                            ai_data = repair_script_by_real_duration(ai_client, topic, ai_data, float(m.group(1)) if m else (44.0 if isinstance(e, ShortTooShortError) else 91.0), update_status)
 
                 elif format_choisi == "short_twoparts":
                     for repair_attempt in range(3):
@@ -755,7 +769,7 @@ def main():
                         except (ShortTooShortError, ShortTooLongError) as e:
                             if repair_attempt >= 2: raise RuntimeError(str(e) + " Impossible de stabiliser la durée.")
                             m = re.search(r"([0-9]+(?:\.[0-9]+)?)", str(e))
-                            ai_data = repair_script_by_real_duration(groq_client, topic, ai_data, float(m.group(1)) if m else (44.0 if isinstance(e, ShortTooShortError) else 91.0), update_status)
+                            ai_data = repair_script_by_real_duration(ai_client, topic, ai_data, float(m.group(1)) if m else (44.0 if isinstance(e, ShortTooShortError) else 91.0), update_status)
                     
                     update_status("✂️ Découpage de la vidéo en 2 parties...")
                     part1, part2 = split_video_in_two(full_video_path, get_media_duration(full_video_path), OUTPUT_DIR)
