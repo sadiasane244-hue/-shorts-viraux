@@ -77,7 +77,7 @@ SHORT_MAX_WORDS = 200
 
 
 # ============================================================
-# FICHIERS VISUELS & SONORES
+# FICHIERS VISUELS
 # ============================================================
 
 MASCOT_FILES = {
@@ -96,17 +96,6 @@ MASCOT_FILES = {
 if not MASCOT_FILES["default"].exists():
     Image.new("RGBA", (200, 200), color=(0, 0, 0, 0)).save(MASCOT_FILES["default"])
 
-CUSTOM_EMOJIS = {
-    "sfx_boom": BASE_DIR / "emoji_boom.png",
-    "sfx_glitch": BASE_DIR / "emoji_glitch.png",
-    "sfx_siren": BASE_DIR / "emoji_siren.png",
-    "sfx_punch": BASE_DIR / "emoji_punch.png",
-    "sfx_cricket": BASE_DIR / "emoji_cricket.png",
-    "sfx_laugh": BASE_DIR / "emoji_laugh.png",
-    "sfx_ding": BASE_DIR / "emoji_ding.png",
-    "sfx_pop": BASE_DIR / "emoji_pop.png",
-}
-
 
 # ============================================================
 # EXCEPTIONS SPÉCIALES
@@ -117,51 +106,45 @@ class ShortTooLongError(RuntimeError): pass
 
 
 # ============================================================
-# SCHÉMA JSON GEMINI (AMÉLIORÉ POUR MICRO-SCÈNES ET PHRASES DESCRIPTIVES)
+# SCHÉMA JSON GEMINI (PHRASES FLUIDES ET NATURELLES)
 # ============================================================
 
 class Scene(BaseModel):
-    text: str = Field(description="Un TRÈS COURT fragment de phrase (3 à 6 mots max). Le but est que la voix off de ce plan dure entre 1.5 et 2.5 secondes maximum.")
+    text: str = Field(description="Une phrase complète, fluide et naturelle à l'oral (8 à 15 mots). Interdit de couper les phrases en milieu d'idée.")
     emotion: str = Field(description="Émotion de la mascotte parmi: default, thinking, confused, laughing, explaining, surprised, angry, happy, shocked, sad")
-    visual_query: str = Field(description="Une phrase descriptive complète et détaillée en anglais (ex: 'young woman walking and tripping on the street', 'man staring confused at a smartphone'). Décris l'action précise.")
-    sfx: str = Field(default="", description="Nom exact du bruitage. Options: sfx_boom, sfx_glitch, sfx_siren, sfx_punch, sfx_cricket, sfx_laugh, sfx_whoosh, sfx_pop, sfx_ding.")
+    visual_query: str = Field(description="Une phrase descriptive complète et précise en anglais décrivant une action humaine (ex: 'young man frustrated waking up in bed', 'person turning off alarm clock').")
+    sfx: str = Field(default="", description="Nom exact du bruitage optionnel: sfx_boom, sfx_glitch, sfx_siren, sfx_punch, sfx_cricket, sfx_laugh, sfx_whoosh, sfx_pop, sfx_ding.")
 
 class ScriptOutput(BaseModel):
     format_choisi: str = Field(description="Choix parmi: short_single, short_twoparts, long_plus_teaser")
-    title: str = Field(description="Titre YouTube/TikTok très accrocheur, basé sur la curiosité. Max 65 car.")
-    hashtags: List[str] = Field(description="4 à 6 hashtags pertinents directement liés au sujet.")
-    script_principal: List[Scene] = Field(description="Scènes principales découpées en micro-fragments. Pour un Short, viser 120 à 170 mots au total répartis sur beaucoup de scènes courtes.")
+    title: str = Field(description="Titre YouTube/TikTok extrêmement accrocheur et provocateur. Max 65 car.")
+    hashtags: List[str] = Field(description="4 à 6 hashtags pertinents.")
+    script_principal: List[Scene] = Field(description="Scènes principales avec narration fluide. Viser 120 à 160 mots au total.")
     script_teaser: List[Scene] = Field(default_factory=list, description="Scènes du teaser si besoin.")
 
 
 # ============================================================
-# PROMPT GEMINI (AMÉLIORÉ POUR LE RYTHME FRÉNÉTIQUE)
+# PROMPT GEMINI (HUMOUR & NARRATION CAPTIVANTE)
 # ============================================================
 
 SYSTEM_PROMPT = """
-Tu es le réalisateur et scénariste de la chaîne YouTube/TikTok "Cerveau Curieux".
-OBJECTIF : Créer des vidéos virales, humoristiques, dynamiques et documentées sur le cerveau, la psychologie et les comportements humains.
+Tu es le scénariste et réalisateur star de la chaîne "Cerveau Curieux".
+TON OBJECTIF : Créer des vidéos ultra-captivantes, hilarantes et scientifiques sur la psychologie et les comportements humains.
 
-RYTHME FRÉNÉTIQUE (IMPORTANT) :
-- Le montage doit être ultra-dynamique. 
-- Découpe ta narration en de multiples scènes très courtes.
-- Le champ `text` de chaque scène NE DOIT CONTENIR QUE 3 à 6 mots.
-- Une phrase complète doit souvent être séparée sur 2 ou 3 scènes différentes.
+STYLE DE NARRATION :
+- Ton irrévérencieux, comique, énergique et très parlé (façon stand-up scientifique).
+- Utilise l'analogie du Cerveau comme un colocataire complètement parano, dramatique ou paresseux qui gère ton corps comme une entreprise bancale.
+- Humour incisif, métaphores absurdes et punchlines percutantes.
 
-ACCROCHE (HOOK) IMMÉDIATE :
-- Attaque DIRECTEMENT à la première seconde avec une question choc ou une situation vécue.
+FLUIDITÉ DE LA VOIX OFF (CRUCIAL) :
+- Chaque scène doit contenir UNE PHRASE COMPLÈTE ET NATURELLE (8 à 15 mots).
+- La narration doit se lire de manière fluide, sans hachures ni pauses bizarres.
 
-NARRATION ET STORYTELLING :
-- Le Cerveau comme personnage (un colocataire parano ou dramatique).
-- Analogies modernes (bug de mise à jour, lag, alarme).
-- Style parlé et percutant. Vocabulaire jeune et piquant.
+ACCROCHE (HOOK) :
+- Commence direct par une provocation ou une situation absurde vécue par l'auditeur.
 
 RECHERCHE VISUELLE (PEXELS) :
-- Le champ `visual_query` DOIT être une phrase descriptive complète en anglais détaillant une action humaine claire. 
-- Interdit d'utiliser des concepts abstraits. Parle d'humains faisant des actions (ex: "frustrated student looking at papers", "person dropping coffee").
-
-CTA DYNAMIQUE (Dernière scène) :
-- La dernière scène DOIT être une Call To Action originale.
+- `visual_query` doit être une description d'action humaine réaliste en anglais (ex: 'sleeping man suddenly waking up shocked', 'person staring at phone in bed').
 """
 
 
@@ -198,7 +181,44 @@ def count_words_in_scenes(scenes: List[Dict]) -> int:
 
 
 # ============================================================
-# QC VIDÉO & NORMALISATION
+# PHONÉTIQUE & CORRECTION TTS
+# ============================================================
+
+def fix_phonetics_for_tts(text: str) -> str:
+    """Corrige la prononciation des mots complexes ou anglicismes pour Edge-TTS."""
+    replacements = {
+        r"\bacquérir\b": "akérir",
+        r"\bacquiert\b": "akère",
+        r"\bacquis\b": "aki",
+        r"\bacquisition\b": "akizision",
+        r"\bsnooze\b": "snouze",
+        r"\bsnoozer\b": "snouzer",
+        r"\bbuguer\b": "beuguer",
+        r"\bbug\b": "beug",
+        r"\bugs\b": "beugs",
+        r"\bhacker\b": "hakeur",
+        r"\bhack\b": "hak",
+        r"\bfeedback\b": "fidbak",
+        r"\bdesign\b": "dizaine",
+        r"\bchallenge\b": "tchallendje",
+        r"\bbusiness\b": "biznesse",
+        r"\blag\b": "lagg",
+        r"\bcrash\b": "krashe",
+        r"\bcrasher\b": "krasher",
+        r"\bscroller\b": "skroller",
+        r"\bscroll\b": "skroll",
+    }
+    for pattern, replacement in replacements.items():
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+def generate_tts(text: str, output_path: Path):
+    spoken_text = fix_phonetics_for_tts(text)
+    run_command(["edge-tts", "--voice", TTS_VOICE, "--rate", TTS_RATE, "--text", spoken_text, "--write-media", str(output_path)])
+
+
+# ============================================================
+# QC & NETTOYAGE SCRIPT
 # ============================================================
 
 def qc_validate_video(video_path: Path, expected_format: Optional[str] = None):
@@ -207,13 +227,6 @@ def qc_validate_video(video_path: Path, expected_format: Optional[str] = None):
     duration = get_media_duration(video_path)
     if duration <= 0: raise RuntimeError("QC Échec : impossible de lire la durée de la vidéo.")
     return duration
-
-def fix_phonetics_for_tts(text: str) -> str:
-    return text.replace("buguer", "beuguer").replace("Buguer", "Beuguer")
-
-def generate_tts(text: str, output_path: Path):
-    spoken_text = fix_phonetics_for_tts(text)
-    run_command(["edge-tts", "--voice", TTS_VOICE, "--rate", TTS_RATE, "--text", spoken_text, "--write-media", str(output_path)])
 
 def normalize_hashtags(hashtags: List[str]) -> List[str]:
     clean = []
@@ -228,8 +241,6 @@ def normalize_hashtags(hashtags: List[str]) -> List[str]:
     return clean[:6]
 
 def clean_pexels_query(query: str) -> str:
-    # On autorise maintenant les phrases longues (jusqu'à 80 caractères) 
-    # pour garder le contexte complet de l'action.
     query = re.sub(r"[^a-zA-Z\s]", "", query or "")
     words = [w for w in query.split() if len(w) > 1]
     return " ".join(words)[:80].strip()
@@ -285,7 +296,7 @@ def validate_and_repair_script(data: Dict) -> Dict:
 
 
 # ============================================================
-# APPEL GEMINI
+# GEMINI GENERATION
 # ============================================================
 
 def call_gemini_script(client, contents: str) -> Dict:
@@ -296,7 +307,7 @@ def call_gemini_script(client, contents: str) -> Dict:
             system_instruction=SYSTEM_PROMPT,
             response_mime_type="application/json",
             response_schema=ScriptOutput,
-            temperature=0.75,
+            temperature=0.85,
         ),
     )
     parsed = response.parsed.model_dump() if (hasattr(response, "parsed") and response.parsed) else json.loads(response.text)
@@ -307,8 +318,8 @@ def repair_script_by_words(client, topic: str, data: Dict, status_cb, too_short:
     word_count = count_words_in_scenes(scenes)
     current_script = "\n".join(scene.get("text", "") for scene in scenes)
 
-    instruction = f"Le script fait {word_count} mots. Réécris-le pour viser {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots, en gardant le découpage frénétique." if too_short else f"Le script fait {word_count} mots. Réduis-le vers {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots. Garde les scènes très courtes (3-6 mots)."
-    prompt = f"Sujet: {topic}\n\n{instruction}\n\nScript actuel :\n{current_script}\n\nConserve le format humoristique."
+    instruction = f"Le script fait {word_count} mots. Écris des phrases complètes et naturelles pour viser {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots au total." if too_short else f"Le script fait {word_count} mots. Resserre la narration vers {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots avec des phrases fluides."
+    prompt = f"Sujet: {topic}\n\n{instruction}\n\nScript actuel :\n{current_script}\n\nConserve le style hilarant."
     
     status_cb("🧠 Ajustement du contenu avec Gemini...")
     repaired = call_gemini_script(client, prompt)
@@ -318,11 +329,12 @@ def repair_script_by_words(client, topic: str, data: Dict, status_cb, too_short:
 def generate_script_gemini(topic: str, status_cb) -> Tuple[Dict, object]:
     if not GEMINI_API_KEY: raise RuntimeError("Clé API GEMINI manquante.")
     client = genai.Client(api_key=GEMINI_API_KEY)
-    status_cb("🧠 Analyse du sujet et rédaction du script...")
+    status_cb("🧠 Écriture du script drôle et captivant...")
 
     prompt = f"""Sujet à traiter : {topic.strip()}
-    Crée le contenu complet de la vidéo. Coupe les phrases en multiples petites scènes de 3 à 6 mots.
-    Vise {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots au total."""
+    Rédige un script super drôle et dynamique. 
+    Chaque scène doit être une phrase complète et fluide (8 à 15 mots).
+    Vise entre {SHORT_TARGET_MIN_WORDS} et {SHORT_TARGET_MAX_WORDS} mots au total."""
     
     try:
         data = call_gemini_script(client, prompt)
@@ -340,11 +352,11 @@ def repair_script_by_real_duration(client, topic: str, data: Dict, measured_dura
     current_script = "\n".join(scene.get("text", "") for scene in scenes)
 
     if measured_duration < SHORT_MIN_DURATION:
-        status_cb(f"⏱️ Durée réelle trop courte ({measured_duration:.1f} s). Ajout d'infos...")
-        instruction = "Il faut dépasser 35 secondes. Ajoute de l'humour en gardant les micro-scènes de 3-6 mots."
+        status_cb(f"⏱️ Durée réelle trop courte ({measured_duration:.1f} s). Ajout de punchlines...")
+        instruction = "Il faut dépasser 35 secondes. Ajoute une anecdote ou métaphore comique en phrases fluides."
     else:
         status_cb(f"⏱️ Durée réelle trop longue ({measured_duration:.1f} s). Resserrement...")
-        instruction = "Resserre le script pour viser environ 45-65 secondes. Garde le rythme nerveux (3-6 mots par scène)."
+        instruction = "Resserre le script pour viser 45-65 secondes sans hacher les phrases."
 
     prompt = f"Sujet : {topic}\n{instruction}\n\nSCRIPT ACTUEL :\n{current_script}"
     repaired = call_gemini_script(client, prompt)
@@ -353,34 +365,20 @@ def repair_script_by_real_duration(client, topic: str, data: Dict, measured_dura
 
 
 # ============================================================
-# CHOIX INTELLIGENT DU SFX
+# CHOIX SFX
 # ============================================================
 
 def choose_sfx_for_scene(scene: Dict, idx: int, total_scenes: int) -> Optional[Dict]:
     sfx_name = scene.get("sfx", "")
-    
     if idx == total_scenes - 1: sfx_name = "sfx_ding"
     if not sfx_name: return None
     
     sfx_file = BASE_DIR / f"{sfx_name}.mp3"
-    
-    if not sfx_file.exists():
-        if "boom" in sfx_name or "punch" in sfx_name: sfx_file = BASE_DIR / "sfx_pop.mp3"
-        elif "glitch" in sfx_name or "siren" in sfx_name: sfx_file = BASE_DIR / "sfx_whoosh.mp3"
-        else: return None
-        
     if not sfx_file.exists(): return None
 
-    volume_map = {
-        "sfx_boom": 0.20, "sfx_siren": 0.12, "sfx_glitch": 0.15,
-        "sfx_punch": 0.18, "sfx_cricket": 0.25, "sfx_laugh": 0.18,
-        "sfx_suspense": 0.15, "sfx_ding": 0.15, "sfx_pop": 0.10,
-        "sfx_whoosh": 0.13, "sfx_cash": 0.15
-    }
-    
     return {
         "file": sfx_file,
-        "volume": volume_map.get(sfx_name, 0.15),
+        "volume": 0.15,
         "delay": 50,
         "max_duration": 2.0,
         "name": sfx_name
@@ -440,7 +438,7 @@ def add_nasheed_track(voice_audio: Path, work_dir: Path, status_cb=None) -> Path
 
 
 # ============================================================
-# VIDÉO PEXELS & EMOJIS INCORPORÉS
+# VIDÉO PEXELS & MASCOTTE UNIQUE (SANS DOUBLE INCRUSTATION)
 # ============================================================
 
 def search_pexels_video(query: str, orientation: str) -> Optional[str]:
@@ -473,41 +471,26 @@ def download_file(url: str, dest: Path) -> bool:
         return dest.exists() and dest.stat().st_size > 10000
     except Exception: return False
 
-def create_video_clip_from_pexels(visual_file: Path, mascot_img: Path, sfx_icon_img: Optional[Path], output_clip: Path, duration: float, width: int, height: int, mascot_scale: int, pos_x: str, pos_y: str, enable_expr: str, work_dir: Path):
+def create_video_clip_from_pexels(visual_file: Path, mascot_img: Path, output_clip: Path, duration: float, width: int, height: int, mascot_scale: int, pos_x: str, pos_y: str, work_dir: Path):
     fps = 30
     filter_complex = f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps={fps},setsar=1[bg];"
     filter_complex += f"[1:v]scale={mascot_scale}:-1,format=rgba[mascot];"
+    filter_complex += f"[bg][mascot]overlay=x={pos_x}:y={pos_y}[v_out]"
     
-    if sfx_icon_img and sfx_icon_img.exists():
-        icon_scale = int(width * 0.35)
-        filter_complex += f"[2:v]scale={icon_scale}:-1,format=rgba[icon];"
-        filter_complex += f"[bg][mascot]overlay=x={pos_x}:y={pos_y}:enable='{enable_expr}'[v_tmp];"
-        filter_complex += f"[v_tmp][icon]overlay=x=(W-w)/2:y=(H-h)/2:enable='between(t,0.05,0.85)'[v_out]"
-        cmd = [FFMPEG_BIN, "-y", "-stream_loop", "-1", "-i", str(visual_file), "-loop", "1", "-i", str(mascot_img.resolve()), "-loop", "1", "-i", str(sfx_icon_img.resolve()), "-t", str(duration), "-filter_complex", filter_complex, "-map", "[v_out]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(fps), "-movflags", "+faststart", str(output_clip)]
-    else:
-        filter_complex += f"[bg][mascot]overlay=x={pos_x}:y={pos_y}:enable='{enable_expr}'[v_out]"
-        cmd = [FFMPEG_BIN, "-y", "-stream_loop", "-1", "-i", str(visual_file), "-loop", "1", "-i", str(mascot_img.resolve()), "-t", str(duration), "-filter_complex", filter_complex, "-map", "[v_out]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(fps), "-movflags", "+faststart", str(output_clip)]
+    cmd = [FFMPEG_BIN, "-y", "-stream_loop", "-1", "-i", str(visual_file), "-loop", "1", "-i", str(mascot_img.resolve()), "-t", str(duration), "-filter_complex", filter_complex, "-map", "[v_out]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(fps), "-movflags", "+faststart", str(output_clip)]
     run_command(cmd, cwd=work_dir)
 
-def create_fallback_video_clip(output_clip: Path, mascot_img: Path, sfx_icon_img: Optional[Path], duration: float, width: int, height: int, mascot_scale: int, pos_x: str, pos_y: str, enable_expr: str, work_dir: Path):
+def create_fallback_video_clip(output_clip: Path, mascot_img: Path, duration: float, width: int, height: int, mascot_scale: int, pos_x: str, pos_y: str, work_dir: Path):
     fallback = work_dir / f"fallback_{output_clip.stem}.png"
     Image.new("RGB", (width, height), color=(20, 20, 35)).save(fallback)
     fps = 30
-    filter_complex = f"[0:v]scale={width}:{height},fps={fps},setsar=1[bg];[1:v]scale={mascot_scale}:-1,format=rgba[mascot];"
-    
-    if sfx_icon_img and sfx_icon_img.exists():
-        icon_scale = int(width * 0.35)
-        filter_complex += f"[2:v]scale={icon_scale}:-1,format=rgba[icon];"
-        filter_complex += f"[bg][mascot]overlay=x={pos_x}:y={pos_y}:enable='{enable_expr}'[v_tmp];"
-        filter_complex += f"[v_tmp][icon]overlay=x=(W-w)/2:y=(H-h)/2:enable='between(t,0.05,0.85)'[v_out]"
-        cmd = [FFMPEG_BIN, "-y", "-loop", "1", "-i", str(fallback), "-loop", "1", "-i", str(mascot_img.resolve()), "-loop", "1", "-i", str(sfx_icon_img.resolve()), "-t", str(duration), "-filter_complex", filter_complex, "-map", "[v_out]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(fps), "-movflags", "+faststart", str(output_clip)]
-    else:
-        filter_complex += f"[bg][mascot]overlay=x={pos_x}:y={pos_y}:enable='{enable_expr}'[v_out]"
-        cmd = [FFMPEG_BIN, "-y", "-loop", "1", "-i", str(fallback), "-loop", "1", "-i", str(mascot_img.resolve()), "-t", str(duration), "-filter_complex", filter_complex, "-map", "[v_out]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(fps), "-movflags", "+faststart", str(output_clip)]
+    filter_complex = f"[0:v]scale={width}:{height},fps={fps},setsar=1[bg];[1:v]scale={mascot_scale}:-1,format=rgba[mascot];[bg][mascot]overlay=x={pos_x}:y={pos_y}[v_out]"
+    cmd = [FFMPEG_BIN, "-y", "-loop", "1", "-i", str(fallback), "-loop", "1", "-i", str(mascot_img.resolve()), "-t", str(duration), "-filter_complex", filter_complex, "-map", "[v_out]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(fps), "-movflags", "+faststart", str(output_clip)]
     run_command(cmd, cwd=work_dir)
 
+
 # ============================================================
-# SOUS-TITRES ASS DYNAMIQUES 
+# SOUS-TITRES ASS DYNAMIQUES
 # ============================================================
 
 def create_ass_subtitles(scenes: List[Dict], output_ass: Path, width: int, height: int):
@@ -561,7 +544,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
     width, height = (1080, 1920) if video_format == "portrait" else (1920, 1080)
     orientation = "portrait" if video_format == "portrait" else "landscape"
 
-    status_cb("🎙️ Génération de la voix off...")
+    status_cb("🎙️ Génération de la voix off fluide...")
     audio_clips = [process_scene_audio(scene, idx, len(script_scenes), work_dir) for idx, scene in enumerate(script_scenes)]
     raw_audio = concatenate_audio(audio_clips, work_dir)
     full_audio = add_nasheed_track(raw_audio, work_dir, status_cb)
@@ -576,7 +559,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
 
     status_cb("🎥 Recherche Pexels et Montage des scènes...")
     video_clips = []
-    mascot_scale = int(width * 0.19) if video_format == "portrait" else int(width * 0.14)
+    mascot_scale = int(width * 0.18) if video_format == "portrait" else int(width * 0.13)
     mascot_positions = [("(W-w)/2", "H-h-470"), ("40", "H-h-470"), ("W-w-40", "H-h-470")] if video_format == "portrait" else [("40", "H-h-40"), ("W-w-40", "H-h-40"), ("40", "H-h-120")]
 
     for idx, scene in enumerate(script_scenes):
@@ -584,21 +567,16 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         mascot_img = MASCOT_FILES.get(scene.get("emotion", "default"), MASCOT_FILES["default"])
         if not mascot_img.exists(): mascot_img = MASCOT_FILES["default"]
 
-        sfx_name = scene.get("sfx", "")
-        if idx == len(script_scenes) - 1: sfx_name = "sfx_ding"
-        sfx_icon_img = CUSTOM_EMOJIS.get(sfx_name)
-
         status_cb(f"🎬 Clip {idx + 1}/{len(script_scenes)} : {scene.get('visual_query', '')}")
         url = search_pexels_video(scene.get("visual_query", "human action"), orientation)
         visual_file = work_dir / f"src_vis_{idx:03d}.mp4"
         output_clip = work_dir / f"clip_{idx:03d}.mp4"
         pos_x, pos_y = mascot_positions[idx % len(mascot_positions)]
-        enable_expr = f"between(t,0,{min(2.5, duration)})"
 
         if url and download_file(url, visual_file):
-            create_video_clip_from_pexels(visual_file, mascot_img, sfx_icon_img, output_clip, duration, width, height, mascot_scale, pos_x, pos_y, enable_expr, work_dir)
+            create_video_clip_from_pexels(visual_file, mascot_img, output_clip, duration, width, height, mascot_scale, pos_x, pos_y, work_dir)
         else:
-            create_fallback_video_clip(output_clip, mascot_img, sfx_icon_img, duration, width, height, mascot_scale, pos_x, pos_y, enable_expr, work_dir)
+            create_fallback_video_clip(output_clip, mascot_img, duration, width, height, mascot_scale, pos_x, pos_y, work_dir)
         video_clips.append(output_clip)
 
     status_cb("⚡ Fusion finale et sous-titres...")
@@ -673,9 +651,6 @@ def render_results():
         if NASHEED_FILE.exists(): st.success("🎵 Nasheed : actif")
         else: st.info("🎵 Nasheed : désactivé")
         
-        active_sfx = [k.replace("sfx_", "") for k, v in CUSTOM_EMOJIS.items() if (BASE_DIR / f"{k}.mp3").exists()]
-        if active_sfx: st.caption("🔊 SFX actifs : " + ", ".join(active_sfx))
-        
         with st.expander("📜 Voir le script complet"):
             st.code("".join(f"Scène {idx + 1} : {scene.get('text', '')}\n\n" for idx, scene in enumerate(ai_data.get("script_principal", []))), language="text")
 
@@ -723,19 +698,13 @@ def main():
         st.markdown("### 🎵 Audio")
         if NASHEED_FILE.exists(): st.success("Nasheed actif")
         else: st.info("Nasheed désactivé")
-        sfx_count = sum([1 for k in CUSTOM_EMOJIS if (BASE_DIR / f"{k}.mp3").exists()])
-        st.caption(f"🔊 {sfx_count} bruitages disponibles")
-        st.caption("Voix prioritaire • SFX synchronisés avec Emojis 3D")
-        st.markdown("---")
-        st.caption("Accroche directe / CTA sur-mesure")
-        st.caption("Short : plus de 35 secondes")
 
     st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Studio IA Autonome 🎬</div>', unsafe_allow_html=True)
     cleanup_old_temp_dirs()
 
     st.markdown("### 📝 Quel est ton sujet aujourd'hui ?")
-    topic = st.text_area("Sujet", placeholder="Ex: Pourquoi le cerveau oublie-t-il ce qu'il est venu chercher en passant une porte ?", label_visibility="collapsed", height=120, key="topic_input")
+    topic = st.text_area("Sujet", placeholder="Ex: Pourquoi le cerveau nous force-t-il à repousser l'alarme du matin ?", label_visibility="collapsed", height=120, key="topic_input")
 
     if st.button("🚀 LANCER LA GÉNÉRATION", key="generate_video_button"):
         if not topic.strip():
@@ -743,13 +712,12 @@ def main():
             return
 
         clear_generation_result()
-        with st.status("🎬 Allumage des caméras virtuelles...", expanded=True) as status_box:
+        with st.status("🎬 Production de la vidéo en cours...", expanded=True) as status_box:
             try:
                 def update_status(msg): st.write(msg)
                 
                 ai_data, gemini_client = generate_script_gemini(topic, update_status)
                 format_choisi = ai_data.get("format_choisi", "short_single")
-                title = ai_data.get("title", "Pourquoi ton cerveau fait ça")
                 word_count = count_words_in_scenes(ai_data.get("script_principal", []))
                 
                 st.write(f"✅ Format défini : **{format_choisi.replace('_', ' ').title()}**")
