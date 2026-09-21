@@ -12,10 +12,7 @@ import requests
 from PIL import Image
 import streamlit as st
 from pydantic import BaseModel, Field
-
-# SDK Google GenAI unifié
-from google import genai
-from google.genai import types
+from openai import OpenAI
 
 
 # ============================================================
@@ -44,7 +41,7 @@ def get_secret(name: str) -> str:
     return value or ""
 
 PEXELS_API_KEY = get_secret("PEXELS_API_KEY")
-GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
+GROQ_API_KEY = get_secret("GROQ_API_KEY")
 
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
@@ -103,25 +100,7 @@ class ShortTooLongError(RuntimeError): pass
 
 
 # ============================================================
-# SCHÉMA JSON GEMINI (PHRASES FLUIDES ET NATURELLES)
-# ============================================================
-
-class Scene(BaseModel):
-    text: str = Field(description="Une phrase complète, fluide et naturelle à l'oral (8 à 15 mots). Interdit de couper les phrases en milieu d'idée.")
-    emotion: str = Field(description="Émotion de la mascotte parmi: default, thinking, confused, laughing, explaining, surprised, angry, happy, shocked, sad")
-    visual_query: str = Field(description="Une phrase descriptive complète et précise en anglais décrivant une action humaine (ex: 'young man frustrated waking up in bed', 'person turning off alarm clock').")
-    sfx: str = Field(default="", description="Nom exact du bruitage optionnel: sfx_boom, sfx_glitch, sfx_siren, sfx_punch, sfx_cricket, sfx_laugh, sfx_whoosh, sfx_pop, sfx_ding.")
-
-class ScriptOutput(BaseModel):
-    format_choisi: str = Field(description="Choix parmi: short_single, short_twoparts, long_plus_teaser")
-    title: str = Field(description="Titre YouTube/TikTok extrêmement accrocheur et provocateur. Max 65 car.")
-    hashtags: List[str] = Field(description="4 à 6 hashtags pertinents.")
-    script_principal: List[Scene] = Field(description="Scènes principales avec narration fluide. Viser 120 à 160 mots au total.")
-    script_teaser: List[Scene] = Field(default_factory=list, description="Scènes du teaser si besoin.")
-
-
-# ============================================================
-# PROMPT GEMINI (HUMOUR & NARRATION CAPTIVANTE)
+# PROMPT GROQ / LLAMA 3 (HUMOUR & JSON STRICT)
 # ============================================================
 
 SYSTEM_PROMPT = """
@@ -142,6 +121,24 @@ ACCROCHE (HOOK) :
 
 RECHERCHE VISUELLE (PEXELS) :
 - `visual_query` doit être une description d'action humaine réaliste en anglais (ex: 'sleeping man suddenly waking up shocked', 'person staring at phone in bed').
+
+FORMAT DE RÉPONSE STRICT (RÉPONDS UNIQUEMENT EN JSON VALIDE) :
+{
+  "format_choisi": "short_single",
+  "title": "Titre accrocheur (max 65 car)",
+  "hashtags": ["#Cerveau", "#Psychologie", "#Science"],
+  "script_principal": [
+    {
+      "text": "Une phrase complète et fluide (8 à 15 mots).",
+      "emotion": "default",
+      "visual_query": "young man waking up frustrated",
+      "sfx": "sfx_pop"
+    }
+  ],
+  "script_teaser": []
+}
+Émotions autorisées : default, thinking, confused, laughing, explaining, surprised, angry, happy, shocked, sad.
+SFX autorisés : sfx_boom, sfx_glitch, sfx_siren, sfx_punch, sfx_cricket, sfx_laugh, sfx_whoosh, sfx_pop, sfx_ding.
 """
 
 
@@ -243,7 +240,7 @@ def clean_pexels_query(query: str) -> str:
     return " ".join(words)[:80].strip()
 
 def normalize_scene(scene) -> Optional[Dict]:
-    if hasattr(scene, "model_dump"): scene = scene.model_dump()
+    if isinstance(scene, str): return None
     if not isinstance(scene, dict): return None
 
     text = str(scene.get("text", "")).strip()
@@ -263,13 +260,13 @@ def normalize_scene(scene) -> Optional[Dict]:
     }
 
 def validate_and_repair_script(data: Dict) -> Dict:
-    if not isinstance(data, dict): raise RuntimeError("Réponse Gemini invalide.")
+    if not isinstance(data, dict): raise RuntimeError("Réponse IA invalide.")
     
     scenes = data.get("script_principal") or []
-    if not scenes: raise RuntimeError("Gemini n'a généré aucune scène.")
+    if not scenes: raise RuntimeError("L'IA n'a généré aucune scène.")
 
     normalized = [normalize_scene(s) for s in scenes if normalize_scene(s)]
-    if not normalized: raise RuntimeError("Le script Gemini est vide.")
+    if not normalized: raise RuntimeError("Le script est vide.")
 
     normalized[-1]["emotion"] = "happy"
     normalized[-1]["sfx"] = "sfx_ding"
@@ -293,37 +290,37 @@ def validate_and_repair_script(data: Dict) -> Dict:
 
 
 # ============================================================
-# GEMINI GENERATION (AVEC RETRY AUTOMATIQUE EN CAS DE SURCHARGE 503)
+# GROQ GENERATION (LLAMA 3.3 / LLAMA 3.1 ULTRA RAPIDE)
 # ============================================================
 
-def call_gemini_script(client, contents: str, status_cb=None) -> Dict:
+def call_groq_script(client: OpenAI, contents: str, status_cb=None) -> Dict:
     max_retries = 5
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    response_mime_type="application/json",
-                    response_schema=ScriptOutput,
-                    temperature=0.85,
-                ),
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": contents}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.85,
             )
-            parsed = response.parsed.model_dump() if (hasattr(response, "parsed") and response.parsed) else json.loads(response.text)
+            raw_text = response.choices[0].message.content
+            parsed = json.loads(raw_text)
             return validate_and_repair_script(parsed)
         except Exception as e:
-            error_msg = str(e)
-            if any(err in error_msg for err in ["503", "429", "UNAVAILABLE", "Too Many Requests", "high demand"]):
+            error_msg = str(e).lower()
+            if any(err in error_msg for err in ["rate", "429", "503", "500", "unavailable", "overloaded", "busy"]):
                 if attempt < max_retries - 1:
                     sleep_time = (2 ** attempt) + random.uniform(0.5, 1.5)
                     if status_cb:
-                        status_cb(f"⏳ Serveurs API surchargés (503). Retentative auto dans {sleep_time:.1f}s... (Essai {attempt + 1}/{max_retries})")
+                        status_cb(f"⏳ Serveur Groq occupé. Retentative auto dans {sleep_time:.1f}s... (Essai {attempt + 1}/{max_retries})")
                     time.sleep(sleep_time)
                     continue
-            raise RuntimeError(f"Erreur API Gemini : {e}")
+            raise RuntimeError(f"Erreur API Groq : {e}")
 
-def repair_script_by_words(client, topic: str, data: Dict, status_cb, too_short: bool) -> Dict:
+def repair_script_by_words(client: OpenAI, topic: str, data: Dict, status_cb, too_short: bool) -> Dict:
     scenes = data.get("script_principal", [])
     word_count = count_words_in_scenes(scenes)
     current_script = "\n".join(scene.get("text", "") for scene in scenes)
@@ -331,15 +328,19 @@ def repair_script_by_words(client, topic: str, data: Dict, status_cb, too_short:
     instruction = f"Le script fait {word_count} mots. Écris des phrases complètes et naturelles pour viser {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots au total." if too_short else f"Le script fait {word_count} mots. Resserre la narration vers {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots avec des phrases fluides."
     prompt = f"Sujet: {topic}\n\n{instruction}\n\nScript actuel :\n{current_script}\n\nConserve le style hilarant."
     
-    status_cb("🧠 Ajustement du contenu avec Gemini...")
-    repaired = call_gemini_script(client, prompt, status_cb)
+    status_cb("🧠 Ajustement du contenu avec Groq...")
+    repaired = call_groq_script(client, prompt, status_cb)
     repaired["format_choisi"] = data.get("format_choisi", repaired.get("format_choisi", "short_single"))
     return repaired
 
-def generate_script_gemini(topic: str, status_cb) -> Tuple[Dict, object]:
-    if not GEMINI_API_KEY: raise RuntimeError("Clé API GEMINI manquante.")
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    status_cb("🧠 Écriture du script drôle et captivant...")
+def generate_script_groq(topic: str, status_cb) -> Tuple[Dict, OpenAI]:
+    if not GROQ_API_KEY: raise RuntimeError("Clé API GROQ_API_KEY manquante dans les secrets.")
+    
+    client = OpenAI(
+        api_key=GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1"
+    )
+    status_cb("🧠 Écriture du script drôle et captivant avec Groq...")
 
     prompt = f"""Sujet à traiter : {topic.strip()}
     Rédige un script super drôle et dynamique. 
@@ -347,7 +348,7 @@ def generate_script_gemini(topic: str, status_cb) -> Tuple[Dict, object]:
     Vise entre {SHORT_TARGET_MIN_WORDS} et {SHORT_TARGET_MAX_WORDS} mots au total."""
     
     try:
-        data = call_gemini_script(client, prompt, status_cb)
+        data = call_groq_script(client, prompt, status_cb)
         format_choisi = data.get("format_choisi", "short_single")
         if format_choisi in ("short_single", "short_twoparts"):
             word_count = count_words_in_scenes(data.get("script_principal", []))
@@ -355,9 +356,9 @@ def generate_script_gemini(topic: str, status_cb) -> Tuple[Dict, object]:
             elif word_count > SHORT_MAX_WORDS: data = repair_script_by_words(client, topic, data, status_cb, False)
         return (data, client)
     except Exception as e:
-        raise RuntimeError(f"Erreur Gemini : {e}")
+        raise RuntimeError(f"Erreur Groq : {e}")
 
-def repair_script_by_real_duration(client, topic: str, data: Dict, measured_duration: float, status_cb) -> Dict:
+def repair_script_by_real_duration(client: OpenAI, topic: str, data: Dict, measured_duration: float, status_cb) -> Dict:
     scenes = data.get("script_principal", [])
     current_script = "\n".join(scene.get("text", "") for scene in scenes)
 
@@ -369,7 +370,7 @@ def repair_script_by_real_duration(client, topic: str, data: Dict, measured_dura
         instruction = "Resserre le script pour viser 45-65 secondes sans hacher les phrases."
 
     prompt = f"Sujet : {topic}\n{instruction}\n\nSCRIPT ACTUEL :\n{current_script}"
-    repaired = call_gemini_script(client, prompt, status_cb)
+    repaired = call_groq_script(client, prompt, status_cb)
     repaired["format_choisi"] = data.get("format_choisi", repaired.get("format_choisi", "short_single"))
     return repaired
 
@@ -428,7 +429,7 @@ def concatenate_audio(audio_clips: List[Path], work_dir: Path) -> Path:
     return raw_audio
 
 def convert_audio_to_aac(voice_audio: Path, work_dir: Path) -> Path:
-    """Convertit la piste vocale pure au format AAC pour le rendu final."""
+    """Convertit la piste vocale au format AAC."""
     output = work_dir / "full_audio.m4a"
     run_command([FFMPEG_BIN, "-y", "-i", str(voice_audio), "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", str(output)], cwd=work_dir)
     return output
@@ -686,8 +687,8 @@ def main():
         st.markdown("<h3 style='text-align:center;'>Tableau de bord</h3>", unsafe_allow_html=True)
         if MASCOT_FILES["default"].exists(): st.image(str(MASCOT_FILES["default"]), use_container_width=True)
         st.markdown("---")
-        st.markdown("🎯 **Mode Autonome Actif**")
-        st.write("Pipeline Gemini + Edge-TTS + Pexels Video + FFmpeg.")
+        st.markdown("⚡ **Moteur : Groq (Llama 3.3)**")
+        st.write("Génération ultra-rapide et modèle gratuit illimité.")
 
     st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Studio IA Autonome 🎬</div>', unsafe_allow_html=True)
@@ -706,7 +707,7 @@ def main():
             try:
                 def update_status(msg): st.write(msg)
                 
-                ai_data, gemini_client = generate_script_gemini(topic, update_status)
+                ai_data, groq_client = generate_script_groq(topic, update_status)
                 format_choisi = ai_data.get("format_choisi", "short_single")
                 word_count = count_words_in_scenes(ai_data.get("script_principal", []))
                 
@@ -721,7 +722,7 @@ def main():
                         except (ShortTooShortError, ShortTooLongError) as e:
                             if repair_attempt >= 2: raise RuntimeError(str(e) + " Impossible de stabiliser la durée.")
                             m = re.search(r"([0-9]+(?:\.[0-9]+)?)", str(e))
-                            ai_data = repair_script_by_real_duration(gemini_client, topic, ai_data, float(m.group(1)) if m else (44.0 if isinstance(e, ShortTooShortError) else 91.0), update_status)
+                            ai_data = repair_script_by_real_duration(groq_client, topic, ai_data, float(m.group(1)) if m else (44.0 if isinstance(e, ShortTooShortError) else 91.0), update_status)
 
                 elif format_choisi == "short_twoparts":
                     for repair_attempt in range(3):
@@ -731,7 +732,7 @@ def main():
                         except (ShortTooShortError, ShortTooLongError) as e:
                             if repair_attempt >= 2: raise RuntimeError(str(e) + " Impossible de stabiliser la durée.")
                             m = re.search(r"([0-9]+(?:\.[0-9]+)?)", str(e))
-                            ai_data = repair_script_by_real_duration(gemini_client, topic, ai_data, float(m.group(1)) if m else (44.0 if isinstance(e, ShortTooShortError) else 91.0), update_status)
+                            ai_data = repair_script_by_real_duration(groq_client, topic, ai_data, float(m.group(1)) if m else (44.0 if isinstance(e, ShortTooShortError) else 91.0), update_status)
                     
                     update_status("✂️ Découpage de la vidéo en 2 parties...")
                     part1, part2 = split_video_in_two(full_video_path, get_media_duration(full_video_path), OUTPUT_DIR)
