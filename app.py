@@ -290,7 +290,7 @@ def validate_and_repair_script(data: Dict) -> Dict:
 
 
 # ============================================================
-# GROQ GENERATION (LLAMA 3.3 / LLAMA 3.1 ULTRA RAPIDE)
+# GROQ GENERATION (MODÈLE STABLE : LLAMA 3 70B)
 # ============================================================
 
 def call_groq_script(client: OpenAI, contents: str, status_cb=None) -> Dict:
@@ -298,7 +298,7 @@ def call_groq_script(client: OpenAI, contents: str, status_cb=None) -> Dict:
     for attempt in range(max_retries):
         try:
             response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model="llama3-70b-8192",  # Modèle cœur, extrêmement stable
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": contents}
@@ -687,8 +687,8 @@ def main():
         st.markdown("<h3 style='text-align:center;'>Tableau de bord</h3>", unsafe_allow_html=True)
         if MASCOT_FILES["default"].exists(): st.image(str(MASCOT_FILES["default"]), use_container_width=True)
         st.markdown("---")
-        st.markdown("⚡ **Moteur : Groq (Llama 3.3)**")
-        st.write("Génération ultra-rapide et modèle gratuit illimité.")
+        st.markdown("⚡ **Moteur : Groq (Llama 3)**")
+        st.write("Génération ultra-rapide et stable.")
 
     st.markdown('<div class="main-title">🧠 Cerveau Curieux</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Studio IA Autonome 🎬</div>', unsafe_allow_html=True)
