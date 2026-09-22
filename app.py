@@ -86,16 +86,16 @@ TTS_RATE = "+5%"
 
 
 # ============================================================
-# DURÉE DES SHORTS
+# DURÉE DES SHORTS (SEUIL MINIMUM FIXÉ À 30 SECONDES)
 # ============================================================
 
-SHORT_MIN_DURATION = 35.0
-SHORT_TARGET_MIN_DURATION = 40.0
+SHORT_MIN_DURATION = 30.0
+SHORT_TARGET_MIN_DURATION = 35.0
 SHORT_TARGET_MAX_DURATION = 65.0
 SHORT_MAX_DURATION = 90.0
 
-SHORT_MIN_WORDS = 100
-SHORT_TARGET_MIN_WORDS = 120
+SHORT_MIN_WORDS = 85
+SHORT_TARGET_MIN_WORDS = 105
 SHORT_TARGET_MAX_WORDS = 170
 SHORT_MAX_WORDS = 200
 
@@ -130,24 +130,25 @@ class ShortTooLongError(RuntimeError): pass
 
 
 # ============================================================
-# PROMPT IA (HUMOUR & JSON STRICT)
+# PROMPT IA (STYLE STREET, HUMOUR & JSON STRICT)
 # ============================================================
 
 SYSTEM_PROMPT = """
 Tu es le scénariste et réalisateur star de la chaîne "Cerveau Curieux".
 TON OBJECTIF : Créer des vidéos ultra-captivantes, hilarantes et scientifiques sur la psychologie et les comportements humains.
 
-STYLE DE NARRATION :
-- Ton irrévérencieux, comique, énergique et très parlé (façon stand-up scientifique).
-- Utilise l'analogie du Cerveau comme un colocataire complètement parano, dramatique ou paresseux qui gère ton corps comme une entreprise bancale.
-- Humour incisif, métaphores absurdes et punchlines percutantes.
+STYLE DE NARRATION (STREET & MODERNE) :
+- Ton hyper parlé, urbain, énergique, naturel et drôle (style street, inspiré de l'accent et des expressions des jeunes et ados d'aujourd'hui).
+- Utilise l'analogie du Cerveau comme un pote ou un colocataire complètement barré, parano, dramatique ou flemmard qui gère ta vie n'importe comment.
+- Humour incisif, métaphores absurdes de la vie quotidienne et punchlines percutantes.
+- INTERDICTION ABSOLUE D'UTILISER DU JARGON INFORMATIQUE OU GEEK : n'utilise JAMAIS les mots "bug", "lag", "redémarrage", "Windows", "mise à jour", "ordinateur", "carte mère", "programme", etc.
 
 FLUIDITÉ DE LA VOIX OFF (CRUCIAL) :
 - Chaque scène doit contenir UNE PHRASE COMPLÈTE ET NATURELLE (8 à 15 mots).
 - La narration doit se lire de manière fluide, sans hachures ni pauses bizarres.
 
 ACCROCHE (HOOK) :
-- Commence direct par une provocation ou une situation absurde vécue par l'auditeur.
+- Commence direct par une provocation ou une situation absurde vécue par l'auditeur (façon "Wesh...", "Ça t'est déjà arrivé...").
 
 RECHERCHE VISUELLE (PEXELS) :
 - `visual_query` doit être une description d'action humaine réaliste en anglais (ex: 'sleeping man suddenly waking up shocked', 'person staring at phone in bed').
@@ -384,7 +385,7 @@ def repair_script_by_words(client: genai.Client, topic: str, data: Dict, status_
     current_script = "\n".join(scene.get("text", "") for scene in scenes)
 
     instruction = f"Le script fait {word_count} mots. Écris des phrases complètes et naturelles pour viser {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots au total." if too_short else f"Le script fait {word_count} mots. Resserre la narration vers {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots avec des phrases fluides."
-    prompt = f"Sujet: {topic}\n\n{instruction}\n\nScript actuel :\n{current_script}\n\nConserve le style hilarant."
+    prompt = f"Sujet: {topic}\n\n{instruction}\n\nScript actuel :\n{current_script}\n\nConserve le style street, urbain et drôle (aucun mot d'informatique)."
     
     status_cb("🧠 Ajustement du contenu avec Gemini...")
     repaired = call_ai_script(client, prompt, status_cb)
@@ -399,7 +400,7 @@ def generate_script_ai(topic: str, status_cb) -> Tuple[Dict, genai.Client]:
     status_cb("🧠 Écriture du script drôle avec Gemini...")
 
     prompt = f"""Sujet à traiter : {topic.strip()}
-    Rédige un script super drôle et dynamique. 
+    Rédige un script super drôle, parlé et dynamique (style street/jeunes, sans vocabulaire informatique). 
     Chaque scène doit être une phrase complète et fluide (8 à 15 mots).
     Vise entre {SHORT_TARGET_MIN_WORDS} et {SHORT_TARGET_MAX_WORDS} mots au total."""
     
@@ -420,10 +421,10 @@ def repair_script_by_real_duration(client: genai.Client, topic: str, data: Dict,
 
     if measured_duration < SHORT_MIN_DURATION:
         status_cb(f"⏱️ Durée réelle trop courte ({measured_duration:.1f} s). Ajout de punchlines...")
-        instruction = "Il faut dépasser 35 secondes. Ajoute une anecdote ou métaphore comique en phrases fluides."
+        instruction = "Il faut dépasser 30 secondes. Ajoute une anecdote ou métaphore comique en phrases fluides, toujours en style street et sans terme d'informatique."
     else:
         status_cb(f"⏱️ Durée réelle trop longue ({measured_duration:.1f} s). Resserrement...")
-        instruction = "Resserre le script pour viser 45-65 secondes sans hacher les phrases."
+        instruction = "Resserre le script pour viser 35-65 secondes sans hacher les phrases."
 
     prompt = f"Sujet : {topic}\n{instruction}\n\nSCRIPT ACTUEL :\n{current_script}"
     repaired = call_ai_script(client, prompt, status_cb)
@@ -629,7 +630,7 @@ def generate_video_pipeline(script_scenes: List[Dict], video_format: str, status
         if url and download_file(url, visual_file):
             create_video_clip_from_pexels(visual_file, mascot_img, output_clip, duration, width, height, mascot_scale, pos_x, pos_y, work_dir)
         else:
-            create_fallback_video_clip(output_clip, mascot_img, output_clip, duration, width, height, mascot_scale, pos_x, pos_y, work_dir)
+            create_fallback_video_clip(output_clip, mascot_img, duration, width, height, mascot_scale, pos_x, pos_y, work_dir)
         video_clips.append(output_clip)
 
     status_cb("⚡ Fusion finale et sous-titres...")
@@ -777,7 +778,7 @@ def main():
                         except (ShortTooShortError, ShortTooLongError) as e:
                             if repair_attempt >= 2: raise RuntimeError(str(e) + " Impossible de stabiliser la durée.")
                             m = re.search(r"([0-9]+(?:\.[0-9]+)?)", str(e))
-                            ai_data = repair_script_by_real_duration(ai_client, topic, ai_data, float(m.group(1)) if m else (44.0 if isinstance(e, ShortTooShortError) else 91.0), update_status)
+                            ai_data = repair_script_by_real_duration(ai_client, topic, ai_data, float(m.group(1)) if m else (35.0 if isinstance(e, ShortTooShortError) else 91.0), update_status)
 
                 elif format_choisi == "short_twoparts":
                     for repair_attempt in range(3):
@@ -787,7 +788,7 @@ def main():
                         except (ShortTooShortError, ShortTooLongError) as e:
                             if repair_attempt >= 2: raise RuntimeError(str(e) + " Impossible de stabiliser la durée.")
                             m = re.search(r"([0-9]+(?:\.[0-9]+)?)", str(e))
-                            ai_data = repair_script_by_real_duration(ai_client, topic, ai_data, float(m.group(1)) if m else (44.0 if isinstance(e, ShortTooShortError) else 91.0), update_status)
+                            ai_data = repair_script_by_real_duration(ai_client, topic, ai_data, float(m.group(1)) if m else (35.0 if isinstance(e, ShortTooShortError) else 91.0), update_status)
                     
                     update_status("✂️ Découpage de la vidéo en 2 parties...")
                     part1, part2 = split_video_in_two(full_video_path, get_media_duration(full_video_path), OUTPUT_DIR)
