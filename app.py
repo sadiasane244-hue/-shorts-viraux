@@ -130,12 +130,16 @@ class ShortTooLongError(RuntimeError): pass
 
 
 # ============================================================
-# PROMPT IA (STYLE STREET, HUMOUR & JSON STRICT)
+# PROMPT IA (STRICT : CLARTÉ DU SUJET + STYLE STREET)
 # ============================================================
 
 SYSTEM_PROMPT = """
 Tu es le scénariste et réalisateur star de la chaîne "Cerveau Curieux".
 TON OBJECTIF : Créer des vidéos ultra-captivantes, hilarantes et scientifiques sur la psychologie et les comportements humains.
+
+RÈGLES OBLIGATOIRES DE CLARTÉ DU SUJET :
+1. NOMMER LE SUJET DÈS LE DÉBUT : Tu dois IMPÉRATIVEMENT citer le nom exact du phénomène scientifique ou psychologique (ex: "la paralysie du sommeil", "la paréidolie", "l'effet cocktail party") dans la scène 1 ou la scène 2 (dans les 10 premières secondes). Le spectateur doit savoir EXACTEMENT de quoi on parle immédiatement.
+2. EXPLICATION SCIENTIFIQUE CLAIRE : Tu dois expliquer le vrai mécanisme biologique ou psychologique sous-jacent en 1 ou 2 phrases simples. Ne reste pas uniquement dans l'abstrait.
 
 STYLE DE NARRATION (STREET & MODERNE) :
 - Ton hyper parlé, urbain, énergique, naturel et drôle (style street, inspiré de l'accent et des expressions des jeunes et ados d'aujourd'hui).
@@ -148,7 +152,7 @@ FLUIDITÉ DE LA VOIX OFF (CRUCIAL) :
 - La narration doit se lire de manière fluide, sans hachures ni pauses bizarres.
 
 ACCROCHE (HOOK) :
-- Commence direct par une provocation ou une situation absurde vécue par l'auditeur (façon "Wesh...", "Ça t'est déjà arrivé...").
+- Commence direct par une provocation ou une situation absurde vécue par l'auditeur (façon "Wesh...", "Ça t'est déjà arrivé..."), puis enchaine DIRECTEMENT avec le NOM du sujet.
 
 RECHERCHE VISUELLE (PEXELS) :
 - `visual_query` doit être une description d'action humaine réaliste en anglais (ex: 'sleeping man suddenly waking up shocked', 'person staring at phone in bed').
@@ -385,7 +389,7 @@ def repair_script_by_words(client: genai.Client, topic: str, data: Dict, status_
     current_script = "\n".join(scene.get("text", "") for scene in scenes)
 
     instruction = f"Le script fait {word_count} mots. Écris des phrases complètes et naturelles pour viser {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots au total." if too_short else f"Le script fait {word_count} mots. Resserre la narration vers {SHORT_TARGET_MIN_WORDS} à {SHORT_TARGET_MAX_WORDS} mots avec des phrases fluides."
-    prompt = f"Sujet: {topic}\n\n{instruction}\n\nScript actuel :\n{current_script}\n\nConserve le style street, urbain et drôle (aucun mot d'informatique)."
+    prompt = f"Sujet: {topic}\n\n{instruction}\n\nScript actuel :\n{current_script}\n\nN'OUBLIE PAS : Citer le nom exact du sujet dès le début, expliquer la cause scientifique, garder le style street et bannir le vocabulaire informatique."
     
     status_cb("🧠 Ajustement du contenu avec Gemini...")
     repaired = call_ai_script(client, prompt, status_cb)
@@ -400,7 +404,11 @@ def generate_script_ai(topic: str, status_cb) -> Tuple[Dict, genai.Client]:
     status_cb("🧠 Écriture du script drôle avec Gemini...")
 
     prompt = f"""Sujet à traiter : {topic.strip()}
-    Rédige un script super drôle, parlé et dynamique (style street/jeunes, sans vocabulaire informatique). 
+    Rédige un script super drôle, parlé et dynamique.
+    RAPPEL STRICT :
+    1. Cite LE NOM EXACT du sujet scientifique dès la scène 1 ou 2.
+    2. Explique brièvement la cause biologique réelle.
+    3. Ton street/jeune sans jargon informatique.
     Chaque scène doit être une phrase complète et fluide (8 à 15 mots).
     Vise entre {SHORT_TARGET_MIN_WORDS} et {SHORT_TARGET_MAX_WORDS} mots au total."""
     
@@ -421,7 +429,7 @@ def repair_script_by_real_duration(client: genai.Client, topic: str, data: Dict,
 
     if measured_duration < SHORT_MIN_DURATION:
         status_cb(f"⏱️ Durée réelle trop courte ({measured_duration:.1f} s). Ajout de punchlines...")
-        instruction = "Il faut dépasser 30 secondes. Ajoute une anecdote ou métaphore comique en phrases fluides, toujours en style street et sans terme d'informatique."
+        instruction = "Il faut dépasser 30 secondes. Ajoute une anecdote comique en phrases fluides tout en citant bien le nom du phénomène."
     else:
         status_cb(f"⏱️ Durée réelle trop longue ({measured_duration:.1f} s). Resserrement...")
         instruction = "Resserre le script pour viser 35-65 secondes sans hacher les phrases."
